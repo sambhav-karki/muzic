@@ -33,6 +33,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  directSearch: (query: string, signal?: AbortSignal) => request<Song[]>('/api/search/direct?query=' + encodeURIComponent(query), { signal }),
   authStatus: (signal?: AbortSignal) => request<{ authenticated: boolean }>('/api/auth/status', { signal }),
   trending: (signal?: AbortSignal) => request<Song[]>('/api/discovery/trending', { signal }),
   profile: (signal?: AbortSignal) => request<Profile>('/api/me', { signal }),

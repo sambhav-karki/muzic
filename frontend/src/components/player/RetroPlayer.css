@@ -70,3 +70,4 @@ body:has(.player-dock) { padding-bottom:95px; }
 .player-close { background:var(--bg);color:var(--mint);min-height:28px;min-width:28px; }
 @media(max-height:500px) { .player-console { grid-template-columns:1fr 1fr;gap:6px 12px; }.player-art { height:60px; }.player-lcd { grid-row:span 2; }.player-actions,.player-message { grid-column:1/-1; }.player-top { margin-bottom:5px; }.pixel-cassette { min-width:0; }.pixel-cassette > div { font-size:6px; } }
 @media(max-height:650px) and (min-height:501px) { .player-art { height:8dvh; }.player-console { gap:4px; }.player-lcd { padding:6px; }.pixel-cassette { padding:3px; }.pixel-cassette > span { font-size:24px; }.player-controls button { padding:5px 10px; }.player-top { margin-bottom:6px; }.player-actions .pixel-button { padding:6px 4px; } }
+.retro-player { max-height:85vh;max-height:85dvh; }

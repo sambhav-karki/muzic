@@ -67,6 +67,45 @@ public class YouTubeClient {
         }
     }
 
+    public List<SongDto> searchMusic(String query) {
+        if (query == null || query.isBlank() || query.length() > 500)
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_REQUEST, "Query must contain 1 to 500 characters.");
+        if (apiKey == null || apiKey.isBlank())
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "Music search requires YOUTUBE_API_KEY on the backend.");
+        try {
+            Map<String, Object> response = restClient.get()
+                .uri("/search?part=snippet&type=video&videoCategoryId=10&maxResults=10&videoEmbeddable=true&videoSyndicated=true&q={query}&key={key}", query.trim(), apiKey)
+                .retrieve().body(new ParameterizedTypeReference<Map<String, Object>>() {});
+            if (response == null || !(response.get("items") instanceof List<?> items))
+                throw new IllegalArgumentException();
+            var songs = new java.util.ArrayList<SongDto>();
+            var seen = new java.util.HashSet<String>();
+            for (Object value : items) {
+                Map<?, ?> item = asMap(value), snippet = asMap(item.get("snippet"));
+                String id = text(asMap(item.get("id")).get("videoId"));
+                String title = text(snippet.get("title")), artist = text(snippet.get("channelTitle"));
+                if (!id.matches("[A-Za-z0-9_-]{11}") || title.isBlank() || title.length() > 255
+                    || artist.isBlank() || artist.length() > 255
+                    || "live".equals(text(snippet.get("liveBroadcastContent")))) continue;
+                String thumbnail = "";
+                Map<?, ?> thumbnails = asMap(snippet.get("thumbnails"));
+                for (String size : List.of("high", "medium", "default")) {
+                    String candidate = text(asMap(thumbnails.get(size)).get("url"));
+                    if (validThumbnail(candidate)) { thumbnail = candidate; break; }
+                }
+                if (!validThumbnail(thumbnail) || !seen.add(id)) continue;
+                songs.add(new SongDto(title, artist, id, thumbnail));
+                if (songs.size() == 3) break;
+            }
+            return List.copyOf(songs);
+        } catch (RestClientException | IllegalArgumentException exception) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_GATEWAY, "YouTube music search is unavailable. Check the API key and quota, then retry.");
+        }
+    }
+
     public SongDto searchSong(String query) {
         if (query == null || query.isBlank() || apiKey == null || apiKey.isBlank()) {
             return null;

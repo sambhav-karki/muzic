@@ -1,6 +1,8 @@
 ﻿import { useEffect, useRef, useState } from 'react'
 import type { Song } from '../../services/api'
-import { api } from '../../services/api'
+import { api, GOOGLE_LOGIN_URL } from '../../services/api'
+import PlaylistDialog from '../PlaylistDialog'
+import { useSwiped } from './SwipedContext'
 import { usePlayer } from '../player/PlayerContext'
 import { swipeDirection } from './storage'
 
@@ -14,6 +16,8 @@ export default function SwipeDeck({ onLike }: { onLike: (song: Song) => boolean 
   const [drag, setDrag] = useState(0)
   const start = useRef<{ x: number; y: number; id: number } | null>(null)
   const player = usePlayer()
+  const library = useSwiped()
+  const [adding, setAdding] = useState<Song | null>(null)
   useEffect(() => {
     const controller = new AbortController()
     api.trending(controller.signal).then(tracks => { if (!controller.signal.aborted) setSongs(tracks) })
@@ -31,6 +35,7 @@ export default function SwipeDeck({ onLike }: { onLike: (song: Song) => boolean 
     if ((event.target as HTMLElement).closest('button,input,textarea,select,a') || event.repeat) return
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); choose(event.key === 'ArrowRight') }
   }}>
+    {adding && <PlaylistDialog videoId={adding.youtubeVideoId} onClose={() => setAdding(null)} />}
     <p className="deck-source">LIVE YOUTUBE MUSIC / US TRENDING</p>
     {loading ? <p role="status">LOADING THE NEXT LEVEL...</p> : error ? <div role="alert"><p>{error}</p><button className="pixel-button" onClick={() => { setLoading(true); setError(''); setIndex(0); setRetry(value => value + 1) }}>RETRY</button></div> : song ? <>
       <div className="trading-card pixel-panel" style={{ transform: `translateX(${Math.max(-100, Math.min(100, drag))}px) rotate(${drag / 28}deg)` }}
@@ -42,7 +47,7 @@ export default function SwipeDeck({ onLike }: { onLike: (song: Song) => boolean 
         {song.thumbnailUrl && <img draggable={false} src={song.thumbnailUrl} alt="" />}
         <h3>{song.title}</h3><p>{song.artist}</p><button className="pixel-button" onClick={() => player.play(song)}>PREVIEW TRACK</button>
       </div>
-      <div className="swipe-controls"><button className="pixel-button pass-button" onClick={() => choose(false)}>X PASS</button><button className="pixel-button like-button" onClick={() => choose(true)}>+ LIKE</button></div>
+      <div className="swipe-controls"><button className="pixel-button pass-button" onClick={() => choose(false)}>X PASS</button><button className="pixel-button like-button" onClick={() => choose(true)}>+ LIKE</button><button className="pixel-button secondary" aria-label={'Add ' + song.title + ' to playlist'} onClick={() => { if (library.userId) setAdding(song); else window.location.href = GOOGLE_LOGIN_URL }}>+ PLAYLIST</button></div>
       <p className="deck-hint">Drag left or right, use the buttons, or focus the deck and press arrow keys.</p>
     </> : <div><p>{songs.length ? 'DECK COMPLETE. Nice listening!' : 'No playable trending tracks available.'}</p><button className="pixel-button" onClick={() => { setLoading(true); setError(''); setIndex(0); setRetry(value => value + 1) }}>REFRESH DECK</button></div>}
     <p className="swipe-notice" aria-live="polite">{notice}</p>

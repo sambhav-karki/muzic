@@ -236,3 +236,40 @@ test('creates a YouTube playlist and adds current track to existing or new playl
   expect(bodies).toContainEqual({title:'My playlist',description:'',privacyStatus:'private'})
   expect(bodies.filter(body => (body as {videoId?:string}).videoId)).toHaveLength(2)
 })
+
+test('normal search bypasses AI and track cards offer like and playlist actions', async ({ page }) => {
+  const { prompts } = await mock(page, true)
+  let query = ''
+  let count = 3
+  const inserts: string[] = []
+  await page.route('**/api/search/direct?**', async route => {
+    query = new URL(route.request().url()).searchParams.get('query') || ''
+    await route.fulfill({contentType:'application/json',body:JSON.stringify(songs)})
+  })
+  await page.route('**/api/playlists**', async route => {
+    if (route.request().method() === 'POST') { count++; inserts.push(route.request().postDataJSON().videoId) }
+    await route.fulfill({status:route.request().method() === 'POST' ? 201 : 200, contentType:'application/json',body:JSON.stringify([{id:'music',title:'Music shelf',description:'',thumbnailUrl:null,itemCount:count}])})
+  })
+  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+  await page.goto('/')
+  await page.getByRole('button', {name:/NORMAL SEARCH/}).click()
+  await expect(page.getByRole('button', {name:/NORMAL SEARCH/})).toHaveAttribute('aria-pressed','true')
+  await expect(page.locator('.mode-help')).toContainText('bypasses AI')
+  await page.getByLabel('Enter your music vibe').fill('song & artist')
+  await page.getByRole('button', {name:'SEARCH',exact:true}).click()
+  await expect(page.locator('.recommendations .song-card')).toHaveCount(3)
+  expect(query).toBe('song & artist')
+  expect(prompts).toHaveLength(0)
+  const card = page.locator('.recommendations .track-card').first()
+  await card.getByRole('button', {name:'Like Neon Night',exact:true}).click()
+  await expect(card.getByRole('button', {name:'Neon Night in Swiped',exact:true})).toBeDisabled()
+  await card.getByRole('button', {name:'Add Neon Night to playlist',exact:true}).click()
+  await page.getByRole('button', {name:'Music shelf 3 tracks',exact:true}).click()
+  await expect(page.locator('.toast')).toHaveText('Added to playlist!')
+  await expect(page.locator('.saved-playlists')).toContainText('4 TRACKS')
+  expect(inserts).toEqual([songs[0].youtubeVideoId])
+  await page.getByRole('button', {name:/AI VIBE/}).click()
+  await expect(page.locator('.mode-help')).toContainText('Describe a vibe')
+  await page.getByRole('button', {name:'SEARCH',exact:true}).click()
+  await expect.poll(() => prompts.length).toBe(1)
+})
