@@ -100,8 +100,7 @@ class PlaylistIntegrationTests {
 
     @Test
     void profileDistinguishesGuestsAndAuthenticatedUsers() throws Exception {
-        mvc.perform(get("/api/me")).andExpect(status().isOk())
-            .andExpect(jsonPath("$.authenticated").value(false));
+        mvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/me").with(authentication(auth))).andExpect(status().isOk())
             .andExpect(jsonPath("$.authenticated").value(true))
             .andExpect(jsonPath("$.id").value(userId.toString()));
@@ -114,8 +113,8 @@ class PlaylistIntegrationTests {
         other.setGoogleId("other");
         users.save(other);
         service.save(identity("other"), request());
-        mvc.perform(get("/api/playlists")).andExpect(status().isUnauthorized());
-        mvc.perform(get("/api/playlists").with(authentication(auth))).andExpect(status().isOk())
+        mvc.perform(get("/api/playlists/local")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/playlists/local").with(authentication(auth))).andExpect(status().isOk())
             .andExpect(jsonPath("$.length()").value(1))
             .andExpect(jsonPath("$[0].name").value("Evening jazz"))
             .andExpect(jsonPath("$[0].songs[0].title").value("First"))
@@ -153,7 +152,7 @@ class PlaylistIntegrationTests {
 
     @Test
     void anonymousPlaylistPostStillRequiresLogin() throws Exception {
-        mvc.perform(post("/api/playlists").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/api/playlists/local").contentType(MediaType.APPLICATION_JSON)
             .content("{\"name\":\"Jazz\",\"songs\":[]}")).andExpect(status().isUnauthorized());
         verifyNoInteractions(youtube);
     }
@@ -168,13 +167,13 @@ class PlaylistIntegrationTests {
 
     @Test
     void savesOwnedPlaylistAndRejectsInvalidMetadata() throws Exception {
-        mvc.perform(post("/api/playlists").with(authentication(auth))
+        mvc.perform(post("/api/playlists/local").with(authentication(auth))
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"name\":\"Jazz\",\"songs\":[{\"title\":\"First\",\"artist\":\"Artist\",\"youtubeVideoId\":\"abcdefghijk\"}]}"))
             .andExpect(status().isCreated()).andExpect(jsonPath("$.itemCount").value(1));
         assertEquals(1, playlists.findByUserId(userId).size());
         assertTrue(service.historyContext(userId).contains("Artist - First"));
-        mvc.perform(post("/api/playlists").with(authentication(auth))
+        mvc.perform(post("/api/playlists/local").with(authentication(auth))
             .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"\",\"songs\":[]}"))
             .andExpect(status().isBadRequest())
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
@@ -207,6 +206,25 @@ class PlaylistIntegrationTests {
         verify(youtube, times(1)).createPlaylist(any(), anyString(), anyString());
         verify(youtube, times(1)).addTrackToPlaylist(any(), eq("remote"), eq("abcdefghijk"));
         assertEquals(2, playlists.findById(id).orElseThrow().getSyncedTrackCount());
+    }
+
+    @Test
+    void managesYouTubePlaylistsAndValidatesRequests() throws Exception {
+        var remote = new PlaylistDto("remote", "Soul", "Classic soul", null, 12);
+        when(youtube.fetchUserPlaylists(any())).thenReturn(List.of(remote));
+        when(youtube.createPlaylist(any(), eq("Soul"), eq(""), eq("private"))).thenReturn(remote);
+        mvc.perform(get("/api/playlists").with(authentication(auth))).andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value("remote")).andExpect(jsonPath("$[0].itemCount").value(12));
+        mvc.perform(post("/api/playlists").with(authentication(auth)).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"title\":\"Soul\"}")).andExpect(status().isCreated()).andExpect(jsonPath("$.title").value("Soul"));
+        mvc.perform(post("/api/playlists/remote/items").with(authentication(auth)).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"videoId\":\"abcdefghijk\"}")).andExpect(status().isCreated());
+        verify(youtube).insertTrack(any(), eq("remote"), eq("abcdefghijk"));
+        mvc.perform(post("/api/playlists").with(authentication(auth)).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"title\":\" \",\"privacyStatus\":\"invalid\"}")).andExpect(status().isBadRequest());
+        mvc.perform(post("/api/playlists/remote/items").with(authentication(auth)).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"videoId\":\"invalid\"}")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/playlists")).andExpect(status().isUnauthorized());
     }
 
     @Test

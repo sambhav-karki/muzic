@@ -2,6 +2,8 @@
 import { usePlayer } from './PlayerContext'
 import { useState } from 'react'
 import { useSwiped } from '../discovery/SwipedContext'
+import PlaylistDialog from '../PlaylistDialog'
+import { GOOGLE_LOGIN_URL } from '../../services/api'
 import PixelDialog from '../PixelDialog'
 import './RetroPlayer.css'
 
@@ -34,6 +36,7 @@ function loadYoutube(): Promise<YoutubeApi> {
 export default function RetroPlayer() {
   const player = usePlayer()
   const library = useSwiped()
+  const [adding, setAdding] = useState(false)
   const [minimized, setMinimized] = useState(false)
   const [progress, setProgress] = useState({ time: 0, duration: 0 })
   const latest = useRef(player)
@@ -94,18 +97,19 @@ export default function RetroPlayer() {
   const liked = library.songs.some(song => song.youtubeVideoId === player.song?.youtubeVideoId)
   const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
   const controls = <div className="player-controls"><button className="pixel-button secondary" onClick={player.previous} aria-label="Previous track">|&lt;</button><button className="pixel-button" onClick={player.toggle} aria-label={player.playing ? 'Pause' : 'Play'}>{player.playing ? 'II' : '▶'}</button><button className="pixel-button secondary" onClick={() => void player.next()} disabled={player.busy} aria-label="Next track">&gt;|</button><button className="pixel-button secondary" disabled={player.busy} onClick={() => void player.shuffleTrack()} aria-label="Shuffle" aria-pressed={player.playlistMode ? player.shuffle : undefined}>⇄</button></div>
-  return <><div className="audio-engine" ref={host} aria-hidden="true" />{minimized ? <section className="player-dock pixel-panel" aria-label="Minimized music player">
+  return <>{adding && <PlaylistDialog videoId={player.song.youtubeVideoId} onClose={() => setAdding(false)} />}<div className="audio-engine" ref={host} aria-hidden="true" />{minimized ? <section className="player-dock pixel-panel" aria-label="Minimized music player">
     <button className="dock-title" onClick={() => setMinimized(false)} aria-label="Restore music player"><strong>{player.song.title}</strong><small>{player.song.artist}</small></button>
     {controls}<button className="dock-art" onClick={() => setMinimized(false)} aria-label="Restore player from thumbnail">{player.song.thumbnailUrl ? <img src={player.song.thumbnailUrl} alt="" /> : <span>♫</span>}</button>
     {player.message && <span className="dock-message" role="status">{player.message}</span>}
   </section> : <PixelDialog className="retro-player pixel-panel" label="Music player" onClose={player.stop}>
     <div className="player-top"><span className="pixel-text">MUZIC // POCKET DECK</span><div className="player-window-controls"><button className="player-close" onClick={() => setMinimized(true)} aria-label="Minimize player">_</button><button className="player-close" onClick={player.stop} aria-label="Stop and close player">X</button></div></div>
     <div className="player-console">
+      {player.song.thumbnailUrl && <img className="player-art" src={player.song.thumbnailUrl} alt="Track artwork" />}
       <div className="player-lcd"><span>{player.playing ? '> NOW PLAYING' : 'II PAUSED'}</span><div className="lcd-marquee"><h2>{player.song.title}</h2><p>{player.song.artist}</p></div><small>{player.playlistMode ? player.shuffle ? 'SHUFFLE ON' : 'PLAYLIST MODE' : 'VIBE MODE'}</small></div>
       <div className={`pixel-cassette ${player.playing ? 'spinning' : ''}`} aria-hidden="true"><span>✳</span><div>MUZIC<br />SIDE A · HIGH FIDELITY</div><span>✳</span></div>
       <label className="player-progress">TRACK POSITION<input aria-label="Track position" type="range" min="0" max={progress.duration || 0} step="1" value={Math.min(progress.time, progress.duration)} disabled={!progress.duration} onChange={event => { const time = Number(event.target.value); instance.current?.seekTo(time, true); setProgress(value => ({ ...value, time })) }} /><span>{clock(progress.time)} / {clock(progress.duration)}</span></label>
       {controls}
-      <button className="pixel-button player-like" disabled={liked} aria-pressed={liked} onClick={() => { if (player.song && !library.like(player.song)) player.setMessage('Connect Google to save tracks in Swiped.') }}>{liked ? '♥ IN SWIPED' : '♡ ADD TO SWIPED'}</button>
+      <div className="player-actions"><button className="pixel-button player-like" disabled={liked} aria-pressed={liked} onClick={() => { if (player.song && !library.like(player.song)) player.setMessage('Connect Google to save tracks in Swiped.') }}>{liked ? '♥ IN SWIPED' : '♡ ADD TO SWIPED'}</button><button className="pixel-button secondary" onClick={() => { if (library.userId) setAdding(true); else window.location.href = GOOGLE_LOGIN_URL }}>+ ADD TO PLAYLIST</button></div>
       <label className="player-volume">VOLUME <input type="range" min="0" max="100" value={player.volume} onChange={event => player.setVolume(Number(event.target.value))} /><span>{player.volume}%</span></label>
       {player.message && <p className="player-message" role="status">{player.message}</p>}
       {library.error && <p className="player-message" role="status">{library.error}</p>}

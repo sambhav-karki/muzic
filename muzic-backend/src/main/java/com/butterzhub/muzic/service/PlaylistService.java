@@ -94,6 +94,15 @@ public class PlaylistService {
         return new SyncResult(id, playlist.getYoutubePlaylistId(), true);
     }
 
+    public PlaylistDto createYouTubePlaylist(OAuth2AuthenticationToken auth, com.butterzhub.muzic.dto.CreatePlaylistRequest request) {
+        user(auth);
+        return youtube.createPlaylist(auth, request.title().trim(), request.description() == null ? "" : request.description(),
+            request.privacyStatus() == null ? "private" : request.privacyStatus());
+    }
+    public void addYouTubeTrack(OAuth2AuthenticationToken auth, String playlistId, String videoId) {
+        user(auth);
+        youtube.insertTrack(auth, playlistId, videoId);
+    }
     public List<PlaylistDto> importYouTubePlaylists(OAuth2AuthenticationToken auth) {
         User user = user(auth);
         List<PlaylistDto> remote = youtube.fetchUserPlaylists(auth);

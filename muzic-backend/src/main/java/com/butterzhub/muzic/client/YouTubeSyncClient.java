@@ -77,15 +77,31 @@ public class YouTubeSyncClient {
     }
 
     public String createPlaylist(OAuth2AuthenticationToken auth, String title, String description) {
+        return createPlaylist(auth, title, description, "private").id();
+    }
+    public PlaylistDto createPlaylist(OAuth2AuthenticationToken auth, String title, String description, String privacy) {
         String bearer = token(auth);
         JsonNode result = call(() -> rest.post().uri("/playlists?part=snippet,status")
             .headers(h -> h.setBearerAuth(bearer))
-            .body(Map.of("snippet", Map.of("title", title, "description", description),
-                "status", Map.of("privacyStatus", "private")))
+            .body(Map.of("snippet", Map.of("title", title, "description", description), "status", Map.of("privacyStatus", privacy)))
             .retrieve().body(JsonNode.class));
-        String id = result == null ? "" : result.path("id").asText();
-        if (id.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Missing YouTube playlist ID");
-        return id;
+        if (result == null || result.path("id").asText().isBlank())
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Missing YouTube playlist ID");
+        return playlist(result);
+    }
+    // Interactive writes surface unavailable videos rather than silently skipping them.
+    public void insertTrack(OAuth2AuthenticationToken auth, String playlistId, String videoId) {
+        String bearer = token(auth);
+        call(() -> rest.post().uri("/playlistItems?part=snippet")
+            .headers(h -> h.setBearerAuth(bearer))
+            .body(Map.of("snippet", Map.of("playlistId", playlistId,
+                "resourceId", Map.of("kind", "youtube#video", "videoId", videoId))))
+            .retrieve().toBodilessEntity());
+    }
+    private PlaylistDto playlist(JsonNode item) {
+        JsonNode snippet = item.path("snippet");
+        return new PlaylistDto(item.path("id").asText(), snippet.path("title").asText(), snippet.path("description").asText(),
+            snippet.path("thumbnails").path("default").path("url").asText(null), item.path("contentDetails").path("itemCount").asInt());
     }
 
     public void addTrackToPlaylist(OAuth2AuthenticationToken auth, String playlistId, String videoId) {
@@ -151,19 +167,16 @@ public class YouTubeSyncClient {
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "YouTube import time budget reached");
             String currentPage = page;
             JsonNode body = call(() -> rest.get().uri(uri -> uri.path("/playlists")
-                .queryParam("part", "snippet").queryParam("mine", true).queryParam("maxResults", 50)
+                .queryParam("part", "snippet,contentDetails").queryParam("mine", true).queryParam("maxResults", 50)
                 .queryParam("pageToken", currentPage).build())
                 .headers(h -> h.setBearerAuth(bearer)).retrieve().body(JsonNode.class));
             if (body == null || !body.path("items").isArray())
                 throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Invalid YouTube playlist response");
             for (JsonNode item : body.path("items")) {
-                JsonNode snippet = item.path("snippet");
-                String thumbnail = snippet.path("thumbnails").path("default").path("url").asText(null);
-                items.add(new PlaylistDto(item.path("id").asText(), snippet.path("title").asText(),
-                    snippet.path("description").asText(), thumbnail));
+                items.add(playlist(item));
             }
             page = body.path("nextPageToken").asText("");
-            if (!page.isEmpty() && (!seen.add(page) || seen.size() > 100))
+            if (!page.isEmpty() && !seen.add(page))
                 throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Invalid YouTube pagination");
         } while (!page.isEmpty());
         return List.copyOf(items);

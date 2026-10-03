@@ -1,4 +1,4 @@
 package com.butterzhub.muzic.dto;
-
-// Records expose immutable API values without exposing provider payloads or JPA entities.
-public record PlaylistDto(String playlistId, String title, String description, String thumbnailUrl) {}
+public record PlaylistDto(String id, String title, String description, String thumbnailUrl, int itemCount) {
+ public PlaylistDto(String id, String title, String description, String thumbnailUrl) { this(id,title,description,thumbnailUrl,0); }
+}

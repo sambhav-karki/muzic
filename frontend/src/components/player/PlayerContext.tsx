@@ -79,8 +79,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : 'Could not shuffle.')
     } finally { if (request.current === controller) { request.current = null; setBusy(false) } }
   }
+  const toggle = useCallback(() => { if (song) setPlaying(value => !value) }, [song])
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      const target = event.target
+      if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey || !song) return
+      if (target instanceof HTMLElement && (target.closest('input, textarea, select, button, a, [role="button"]') || target.isContentEditable)) return
+      if (document.querySelector('dialog[open]:not(.retro-player)')) return
+      event.preventDefault(); toggle()
+    }
+    window.addEventListener('keydown', keydown)
+    return () => window.removeEventListener('keydown', keydown)
+  }, [song, toggle])
   const stop = () => { cancel(); setSong(null); setPlaying(false); setPlaylistMode(false); setMessage('') }
-  return <Context.Provider value={{ playbackKey, song, playing, shuffle, volume, busy, message, playlistMode, play, next, previous, shuffleTrack, toggle: () => setPlaying(value => !value), stop, setShuffle, setVolume, setPlaying, setMessage }}>{children}</Context.Provider>
+  return <Context.Provider value={{ playbackKey, song, playing, shuffle, volume, busy, message, playlistMode, play, next, previous, shuffleTrack, toggle, stop, setShuffle, setVolume, setPlaying, setMessage }}>{children}</Context.Provider>
 }
 // oxlint-disable-next-line react/only-export-components
 export function usePlayer() {

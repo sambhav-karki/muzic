@@ -2,14 +2,14 @@ import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 const songs = ['Neon Night', 'Pixel Sunrise', 'Arcade Moon'].map((title, index) => ({
-  title, artist: `Artist ${index + 1}`, youtubeVideoId: String(index + 1).repeat(11), thumbnailUrl: null,
+  title, artist: `Artist ${index + 1}`, youtubeVideoId: String(index + 1).repeat(11), thumbnailUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22320%22 height=%22180%22%3E%3C/svg%3E',
 }))
 const continuation = { ...songs[0], title: 'Next Vibe', youtubeVideoId: '44444444444' }
 
 async function mock(page: Page, authenticated: boolean) {
   const prompts: string[] = []
   const writes: string[] = []
-  await page.route('http://localhost:8080/**', async route => {
+  await page.route('**/api/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
     const headers = { 'access-control-allow-origin': route.request().headers().origin || 'http://localhost:4200', 'access-control-allow-credentials': 'true', 'access-control-allow-headers': 'Content-Type', 'access-control-allow-methods': 'GET,POST,OPTIONS' }
@@ -17,7 +17,7 @@ async function mock(page: Page, authenticated: boolean) {
     let body: unknown = []
     if (path === '/api/auth/status') body = { authenticated }
     if (path === '/api/me') body = { authenticated, id: authenticated ? 'user-a' : null, name: 'Sam', pictureUrl: null }
-    if (path === '/api/playlists') body = [{ id: 'saved-1', name: 'Night Drive', songs, youtubePlaylistId: null }]
+    if (path === '/api/playlists') body = [{ id: 'saved-1', title: 'Night Drive', description: '', thumbnailUrl: null, itemCount: 3 }]
     if (path === '/api/discovery/trending') body = songs
     if (path === '/api/recommend') {
       const prompt = request.postDataJSON().prompt as string
@@ -60,15 +60,18 @@ test('guest search, cached intro and standalone continuation', async ({ page }) 
   await expect(page.locator('.splash-intro')).toHaveCount(0)
 })
 
-test('saved playlist advances locally; liked songs persist without server writes', async ({ page }) => {
+test('YouTube playlists display; liked songs persist without server writes', async ({ page }) => {
   const { prompts, writes } = await mock(page, true)
   await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
   await page.goto('/')
   await expect(page.locator('.account-banner')).toHaveCount(0)
-  await page.getByRole('button', { name: /Night Drive/ }).click()
+  await expect(page.getByRole('link', { name: /Night Drive/ })).toBeVisible()
+  await page.getByLabel('Enter your music vibe').fill('night drive')
+  await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
+  await page.getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
   await page.getByRole('button', { name: 'Next track', exact: true }).click()
-  await expect(page.locator('.player-lcd h2')).toHaveText('Pixel Sunrise')
-  expect(prompts).toHaveLength(0)
+  await expect(page.locator('.player-lcd h2')).toHaveText('Next Vibe')
+  expect(prompts).toHaveLength(2)
   await expect(page.locator('.retro-player')).toHaveCSS('position', 'fixed')
   await page.screenshot({ path: 'test-results/muzic-player.png' })
   await page.getByRole('button', { name: 'Minimize player' }).click()
@@ -164,12 +167,12 @@ test('Swiped preview caps at three; library searches, groups and removes selecte
 for (const endpoint of ['/api/auth/status', '/api/me', '/api/playlists']) {
   test(`401 from ${endpoint} returns to guest and allows Google reconnect`, async ({ page }) => {
     await mock(page, true)
-    await page.route(`http://localhost:8080${endpoint}`, route => route.fulfill({
+    await page.route(`**${endpoint}`, route => route.fulfill({
       status: 401,
       headers: { 'access-control-allow-origin': route.request().headers().origin || 'http://localhost:4200', 'access-control-allow-credentials': 'true' },
       contentType: 'application/json', body: '{}',
     }))
-    await page.route('http://localhost:8080/oauth2/authorization/google', route => route.fulfill({
+    await page.route('**/oauth2/authorization/google', route => route.fulfill({
       contentType: 'text/html', body: '<p>Google login</p>',
     }))
     await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
@@ -177,6 +180,59 @@ for (const endpoint of ['/api/auth/status', '/api/me', '/api/playlists']) {
     await expect(page.locator('.account-banner')).toBeVisible()
     await expect(page.locator('.saved-playlists')).toHaveCount(0)
     await page.locator('.account-banner').click()
-    await expect(page).toHaveURL('http://localhost:8080/oauth2/authorization/google')
+    await expect(page).toHaveURL(/\/oauth2\/authorization\/google$/)
   })
 }
+test('theme persists, space toggles playback and player fits small viewports', async ({ page }) => {
+  await mock(page, true)
+  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Toggle light theme' }).click()
+  await expect(page.locator('body')).toHaveClass(/theme-light/)
+  await page.reload()
+  await expect(page.locator('body')).toHaveClass(/theme-light/)
+  await page.getByRole('button', { name: 'PREVIEW TRACK' }).click()
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
+  await page.locator('.player-lcd').click()
+  await page.keyboard.press('Space')
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+  await page.keyboard.press('Space')
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
+  for (const viewport of [{width:320,height:568},{width:390,height:844},{width:430,height:700},{width:844,height:390},{width:1280,height:800}]) {
+    await page.setViewportSize(viewport)
+    expect(await page.locator('.retro-player').evaluate(el => ({fits: el.scrollHeight <= el.clientHeight && el.scrollWidth <= el.clientWidth, height:el.clientHeight, content:el.scrollHeight})), JSON.stringify(viewport)).toMatchObject({fits:true})
+    await expect(page.locator('.player-actions')).toBeInViewport()
+    await expect(page.locator('.player-volume')).toBeInViewport()
+  }
+})
+
+test('creates a YouTube playlist and adds current track to existing or new playlist', async ({ page }) => {
+  await mock(page, true)
+  const bodies: unknown[] = []
+  await page.route('**/api/playlists**', async route => {
+    if (route.request().method() === 'OPTIONS') { await route.fulfill({status:204}); return }
+    const data = route.request().postDataJSON()
+    if (data) bodies.push(data)
+    const item = {id:'custom',title:'My playlist',description:'',thumbnailUrl:null,itemCount:0}
+    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(route.request().method() === 'GET' ? [item] : item)})
+  })
+  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+  await page.goto('/')
+  await page.getByRole('button', {name:'CREATE PLAYLIST',exact:true}).click()
+  await page.getByLabel('Title',{exact:true}).fill('My playlist')
+  await page.getByRole('button', {name:'CREATE',exact:true}).click()
+  await expect(page.locator('.playlist-dialog')).toHaveCount(0)
+  await page.getByRole('button', {name:'PREVIEW TRACK'}).click()
+  await page.getByRole('button', {name:'+ ADD TO PLAYLIST',exact:true}).click()
+  await page.getByLabel('Playlist',{exact:true}).selectOption('custom')
+  await page.getByRole('button', {name:'ADD TRACK',exact:true}).click()
+  await expect(page.locator('.playlist-dialog')).toHaveCount(0)
+  await page.getByRole('button', {name:'+ ADD TO PLAYLIST',exact:true}).click()
+  await page.getByLabel('Title',{exact:true}).fill('Another playlist')
+  await page.getByLabel('Title',{exact:true}).press('Space')
+  await expect(page.getByRole('button', {name:'Pause',exact:true})).toBeVisible()
+  await page.getByRole('button', {name:'ADD TRACK',exact:true}).click()
+  await expect(page.locator('.playlist-dialog')).toHaveCount(0)
+  expect(bodies).toContainEqual({title:'My playlist',description:'',privacyStatus:'private'})
+  expect(bodies.filter(body => (body as {videoId?:string}).videoId)).toHaveLength(2)
+})

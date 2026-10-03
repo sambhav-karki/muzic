@@ -77,6 +77,16 @@ class YouTubeSyncClientTests {
     }
 
     @Test
+    void interactiveInsertReportsUnavailableVideo() {
+        server.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet"))
+            .andExpect(jsonPath("$.snippet.resourceId.videoId").value("abcdefghijk"))
+            .andRespond(withStatus(HttpStatus.NOT_FOUND).body("{\"error\":{\"errors\":[{\"reason\":\"videoNotFound\"}]}}"));
+        assertEquals(HttpStatus.BAD_GATEWAY, assertThrows(ResponseStatusException.class,
+            () -> client.insertTrack(auth, "remote", "abcdefghijk")).getStatusCode());
+        server.verify();
+    }
+
+    @Test
     void retriesPropagationFailuresBeforeInserting() {
         server.expect(anything()).andRespond(withStatus(HttpStatus.CONFLICT)
             .body("{\"error\":{\"status\":\"ABORTED\"}}"));
@@ -125,7 +135,7 @@ class YouTubeSyncClientTests {
 
     @Test
     void aggregatesAllPages() {
-        server.expect(queryParam("mine", "true")).andExpect(header("Authorization", "Bearer delegated-token"))
+        server.expect(queryParam("mine", "true")).andExpect(queryParam("part", "snippet,contentDetails")).andExpect(header("Authorization", "Bearer delegated-token"))
             .andRespond(withSuccess("{\"items\":[{\"id\":\"one\",\"snippet\":{\"title\":\"Jazz\"}}],\"nextPageToken\":\"next\"}", MediaType.APPLICATION_JSON));
         server.expect(queryParam("pageToken", "next"))
             .andRespond(withSuccess("{\"items\":[{\"id\":\"two\",\"snippet\":{\"title\":\"Soul\"}}]}", MediaType.APPLICATION_JSON));

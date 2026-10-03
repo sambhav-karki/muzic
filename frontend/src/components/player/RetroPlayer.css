@@ -49,3 +49,24 @@ body:has(.player-dock) { padding-bottom:95px; }
   .player-controls { margin:12px 0; }
   .player-like { margin-bottom:12px;padding:10px 15px; }
 }
+.retro-player { width:min(560px,calc(100vw - 24px));height:auto;max-height:88vh;max-height:88dvh;overflow:hidden;padding:clamp(10px,2dvh,20px);background:var(--panel);border-color:var(--mint);box-sizing:border-box; }
+.player-top { margin-bottom:clamp(6px,1.5dvh,14px); }
+.player-console { display:grid;gap:clamp(5px,1.2dvh,12px);min-width:0; }
+.player-art { width:100%;height:clamp(36px,14dvh,120px);object-fit:cover;border:2px solid var(--border); }
+.player-lcd { padding:clamp(6px,1.5dvh,14px); }
+.player-lcd h2 { font-size:clamp(11px,2dvh,18px);margin:5px 0;line-height:1.5; }
+.player-lcd p { margin:0 0 5px;font-size:13px; }
+.player-lcd > span,.player-lcd small { font-size:8px; }
+.pixel-cassette { margin:0;padding:clamp(3px,1dvh,8px); }
+.pixel-cassette > span { font-size:clamp(20px,4dvh,32px); }
+.pixel-cassette > div { font-size:8px; }
+.player-controls { margin:0;gap:clamp(6px,2vw,12px); }
+.player-controls button { min-width:40px;padding:clamp(5px,1dvh,10px) 10px; }
+.player-actions { display:flex;gap:8px; }
+.player-actions .pixel-button { flex:1;min-width:0;margin:0;padding:8px 5px;font-size:7px; }
+.player-volume,.player-progress { font-size:10px;gap:5px; }
+.player-progress input { height:14px; }
+.player-message { margin:0;font-size:11px;line-height:1.3;overflow-wrap:anywhere; }
+.player-close { background:var(--bg);color:var(--mint);min-height:28px;min-width:28px; }
+@media(max-height:500px) { .player-console { grid-template-columns:1fr 1fr;gap:6px 12px; }.player-art { height:60px; }.player-lcd { grid-row:span 2; }.player-actions,.player-message { grid-column:1/-1; }.player-top { margin-bottom:5px; }.pixel-cassette { min-width:0; }.pixel-cassette > div { font-size:6px; } }
+@media(max-height:650px) and (min-height:501px) { .player-art { height:8dvh; }.player-console { gap:4px; }.player-lcd { padding:6px; }.pixel-cassette { padding:3px; }.pixel-cassette > span { font-size:24px; }.player-controls button { padding:5px 10px; }.player-top { margin-bottom:6px; }.player-actions .pixel-button { padding:6px 4px; } }

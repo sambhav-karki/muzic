@@ -48,3 +48,23 @@
 .playlist-card:hover { border-color:var(--mint); }
 .selected-track { color:var(--yellow);font-size:13px; }
 @media(max-width:700px) { .song-grid,.playlist-grid { grid-template-columns:1fr; }.retro-search { gap:8px;padding-left:12px; }.retro-search input { font-size:14px; }.retro-search .pixel-button { padding:13px 10px;font-size:8px; }.section-heading > span { display:none; } }
+:root { --bg:#0f172a;--panel:#121820;--border:#267c88; }
+body { background:var(--bg);color:var(--text);color-scheme:dark; }
+body.theme-light { --bg:#e2e8f0;--panel:#f1f5f9;--mint:#006b59;--pink:#a90053;--yellow:#755200;--text:#0f172a;--muted:#475569;--border:#1e293b;color-scheme:light; }
+body.theme-light::after { opacity:.05; }
+body.theme-light .error-message { color:#a90053; }
+body.theme-light .pixel-button:not(.secondary) { color:#fff; }
+.theme-toggle { flex-shrink:0;padding:10px;font-size:8px; }
+.site-header { gap:clamp(8px,2vw,24px);flex-wrap:wrap;padding:14px 0; }
+.status-chip { max-width:100%;overflow:hidden;text-overflow:ellipsis; }
+.section-heading { flex-wrap:wrap; }
+.playlist-card { text-decoration:none;min-width:0;overflow-wrap:anywhere; }
+.playlist-card img { width:100%;aspect-ratio:16/9;object-fit:cover; }
+.playlist-card p { margin:0;color:var(--muted);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden; }
+.playlist-card small { margin-top:auto;line-height:1.8; }
+.playlist-dialog { width:min(480px,calc(100vw - 24px));max-height:88dvh;padding:clamp(16px,4vw,28px);color:var(--text);overflow:auto; }
+.playlist-dialog h2 { font-family:var(--pixel-font);font-size:12px;line-height:1.8; }
+.playlist-dialog label { display:grid;gap:8px;margin:16px 0; }
+.playlist-dialog input,.playlist-dialog select { width:100%;min-width:0;padding:12px;background:var(--bg);color:var(--text);border:2px solid var(--border); }
+.dialog-actions { display:flex;justify-content:flex-end;flex-wrap:wrap;gap:12px;margin-top:24px; }
+@media(max-width:430px) { .site-header .brand { font-size:18px; }.status-chip { margin-left:0; }.app-shell { padding:0 12px; } }

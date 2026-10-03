@@ -25,17 +25,32 @@ public class PlaylistController {
 
     public PlaylistController(PlaylistService playlists) { this.playlists = playlists; }
 
-    @GetMapping({"", "/"})
+    @GetMapping("/local")
     public List<PlaylistDetailDto> list(OAuth2AuthenticationToken auth) {
         return playlists.list(auth);
     }
 
-    @PostMapping({"", "/"})
+    @PostMapping("/local")
     public ResponseEntity<SavedPlaylistDto> save(@Valid @RequestBody SavePlaylistRequest request,
                                               OAuth2AuthenticationToken auth) {
         return ResponseEntity.status(HttpStatus.CREATED).body(playlists.save(auth, request));
     }
 
+    @GetMapping({"", "/"})
+    public List<com.butterzhub.muzic.dto.PlaylistDto> youtubeList(OAuth2AuthenticationToken auth) {
+        return playlists.importYouTubePlaylists(auth);
+    }
+    @PostMapping({"", "/"})
+    public ResponseEntity<com.butterzhub.muzic.dto.PlaylistDto> create(
+            @Valid @RequestBody com.butterzhub.muzic.dto.CreatePlaylistRequest request, OAuth2AuthenticationToken auth) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(playlists.createYouTubePlaylist(auth, request));
+    }
+    @PostMapping("/{playlistId}/items")
+    public ResponseEntity<Void> add(@PathVariable String playlistId,
+            @Valid @RequestBody com.butterzhub.muzic.dto.AddPlaylistItemRequest request, OAuth2AuthenticationToken auth) {
+        playlists.addYouTubeTrack(auth, playlistId, request.videoId());
+        return ResponseEntity.status(HttpStatus.CREATED).build();
+    }
     @PostMapping("/{id}/sync-youtube")
     public ResponseEntity<PlaylistService.SyncResult> sync(@PathVariable UUID id, OAuth2AuthenticationToken auth) {
         return ResponseEntity.ok(playlists.syncToYouTube(auth, id));
