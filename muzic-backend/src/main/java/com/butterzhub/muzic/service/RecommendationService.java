@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.Objects;
 
 @Service
 public class RecommendationService {
@@ -39,6 +40,7 @@ public class RecommendationService {
         // Resolve each curated search through YouTube while preserving its order.
         return llmClient.suggestSongs(personalizedPrompt).stream()
                 .map(youTubeClient::searchSong)
+                .filter(Objects::nonNull)
                 .toList();
     }
 }

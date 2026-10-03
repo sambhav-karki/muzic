@@ -2,6 +2,9 @@ package com.butterzhub.muzic.controller;
 
 import com.butterzhub.muzic.dto.SavePlaylistRequest;
 import com.butterzhub.muzic.dto.SavedPlaylistDto;
+import com.butterzhub.muzic.dto.PlaylistDetailDto;
+import org.springframework.web.bind.annotation.GetMapping;
+import java.util.List;
 import com.butterzhub.muzic.service.PlaylistService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -21,6 +24,11 @@ public class PlaylistController {
     private final PlaylistService playlists;
 
     public PlaylistController(PlaylistService playlists) { this.playlists = playlists; }
+
+    @GetMapping({"", "/"})
+    public List<PlaylistDetailDto> list(OAuth2AuthenticationToken auth) {
+        return playlists.list(auth);
+    }
 
     @PostMapping({"", "/"})
     public ResponseEntity<SavedPlaylistDto> save(@Valid @RequestBody SavePlaylistRequest request,

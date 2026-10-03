@@ -62,6 +62,16 @@ class RecommendationServiceTests {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"missing", "invalid"})
+    void skipsFailedLookupsWithoutLosingOtherSuggestions(String query) {
+        SongDto song = new SongDto("Title", "Artist", "abcDEFG_123", "https://i.ytimg.com/cover.jpg");
+        when(llmClient.suggestSongs("jazz")).thenReturn(List.of(query, "good"));
+        when(youTubeClient.searchSong(query)).thenReturn(null);
+        when(youTubeClient.searchSong("good")).thenReturn(song);
+        assertEquals(List.of(song), service.getRecommendations("jazz"));
+    }
+
+    @ParameterizedTest
     @NullAndEmptySource
     @ValueSource(strings = {" ", "\t\n"})
     void rejectsBlankPromptsBeforeCallingClients(String prompt) {

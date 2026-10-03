@@ -72,6 +72,31 @@ class PlaylistIntegrationTests {
     }
 
     @Test
+    void profileDistinguishesGuestsAndAuthenticatedUsers() throws Exception {
+        mvc.perform(get("/api/me")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.authenticated").value(false));
+        mvc.perform(get("/api/me").with(authentication(auth))).andExpect(status().isOk())
+            .andExpect(jsonPath("$.authenticated").value(true))
+            .andExpect(jsonPath("$.id").value(userId.toString()));
+    }
+
+    @Test
+    void listsOnlyOwnedPlaylistsWithOrderedTracks() throws Exception {
+        service.save(auth, request());
+        User other = new User();
+        other.setGoogleId("other");
+        users.save(other);
+        service.save(identity("other"), request());
+        mvc.perform(get("/api/playlists")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/playlists").with(authentication(auth))).andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].name").value("Evening jazz"))
+            .andExpect(jsonPath("$[0].songs[0].title").value("First"))
+            .andExpect(jsonPath("$[0].songs[1].youtubeVideoId").value("lmnopqrstuv"));
+        verifyNoInteractions(youtube);
+    }
+
+    @Test
     void loginSuccessUpdatesExistingGoogleIdentity() throws Exception {
         var filter = security.getFilters().stream().filter(OAuth2LoginAuthenticationFilter.class::isInstance)
             .findFirst().orElseThrow();
@@ -80,7 +105,9 @@ class PlaylistIntegrationTests {
         var login = new OAuth2AuthenticationToken(new DefaultOAuth2User(authorities,
             Map.of("sub", "owner", "email", "updated@example.com", "name", "Updated Name",
                 "picture", "https://example.com/avatar"), "sub"), authorities, "google");
-        handler.onAuthenticationSuccess(new MockHttpServletRequest(), new MockHttpServletResponse(), login);
+        var response = new MockHttpServletResponse();
+        handler.onAuthenticationSuccess(new MockHttpServletRequest(), response, login);
+        assertEquals("http://localhost:4200", response.getRedirectedUrl());
         handler.onAuthenticationSuccess(new MockHttpServletRequest(), new MockHttpServletResponse(), login);
         User updated = users.findByGoogleId("owner").orElseThrow();
         assertEquals(userId, updated.getId());

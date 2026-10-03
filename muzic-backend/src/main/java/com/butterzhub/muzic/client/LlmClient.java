@@ -7,7 +7,9 @@ import org.springframework.web.client.RestClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.HttpStatusCodeException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,6 +18,10 @@ import java.util.Map;
 // @Component makes this Gemini adapter available for constructor injection.
 @Component
 public class LlmClient {
+
+    private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
+    private static final List<String> BACKUP_MODELS = List.of(
+            "gemini-flash-latest", "gemini-2.5-pro", "gemini-1.5-flash");
 
     private static final String SYSTEM_PROMPT = """
             Act as a music curator. Recommend exactly 3 distinct, specific songs
@@ -26,14 +32,17 @@ public class LlmClient {
             Do not include markdown fences (```json), commentary, or conversational text.
             """;
     private static final List<String> FALLBACK_SONGS = List.of(
-            "The Beatles - Hey Jude",
-            "Queen - Bohemian Rhapsody",
-            "Michael Jackson - Billie Jean");
+            "Tycho - Awake",
+            "Lofi Fruits Music - Chill Lofi Study",
+            "Miles Davis - So What");
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     // @Value keeps the provider credential in external configuration.
     @Value("${gemini.api.key:}")
     private String apiKey;
+
+    @Value("${gemini.model:gemini-2.5-flash}")
+    private String primaryModel = "gemini-2.5-flash";
 
     private final RestClient restClient;
 
@@ -70,20 +79,39 @@ public class LlmClient {
                             "responseSchema", Map.of("type", "ARRAY", "minItems", 3,
                                     "maxItems", 3, "items", Map.of("type", "STRING"))));
 
-            String response = restClient.post()
-                    .uri("/models/gemini-3.8-flash:generateContent")
-                    .header("X-goog-api-key", apiKey.trim())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(request)
-                    .retrieve()
-                    .body(String.class);
-
-            if (response == null || response.isBlank()) {
-                System.err.println("Gemini returned null/empty response.");
-                return FALLBACK_SONGS;
+            List<String> models = new ArrayList<>();
+            models.add(primaryModel == null || primaryModel.isBlank()
+                    ? "gemini-2.5-flash" : primaryModel.trim());
+            for (String model : BACKUP_MODELS) {
+                if (!models.contains(model)) {
+                    models.add(model);
+                }
             }
 
-            System.out.println("Gemini Raw Response: " + response);
+            String response = null;
+            for (String model : models) {
+                try {
+                    response = restClient.post()
+                            .uri("/models/{model}:generateContent", model)
+                            .header("X-goog-api-key", apiKey.trim())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .body(request)
+                            .retrieve()
+                            .body(String.class);
+                    break;
+                } catch (HttpStatusCodeException ex) {
+                    int status = ex.getStatusCode().value();
+                    logger.warn("Gemini model {} failed with HTTP {}", model, status);
+                    if (status != 503 && status != 429 && status != 404) {
+                        return FALLBACK_SONGS;
+                    }
+                }
+            }
+
+            if (response == null || response.isBlank()) {
+                logger.warn("Gemini model chain exhausted or returned an empty response; using starter songs");
+                return FALLBACK_SONGS;
+            }
 
             JsonNode candidate = JSON.readTree(response).path("candidates").path(0);
             if (!"STOP".equals(candidate.path("finishReason").asText())) {
@@ -121,8 +149,8 @@ public class LlmClient {
             return List.copyOf(searches);
 
         } catch (Exception ex) {
-    System.err.println("Gemini call failed: " + ex.getMessage());
-    return FALLBACK_SONGS;
-}
+            logger.warn("Gemini recommendation failed ({}); using starter songs", ex.getClass().getSimpleName());
+            return FALLBACK_SONGS;
+        }
     }
 }

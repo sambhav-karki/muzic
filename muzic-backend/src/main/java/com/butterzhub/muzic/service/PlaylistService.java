@@ -2,6 +2,8 @@ package com.butterzhub.muzic.service;
 
 import com.butterzhub.muzic.client.YouTubeSyncClient;
 import com.butterzhub.muzic.dto.PlaylistDto;
+import com.butterzhub.muzic.dto.PlaylistDetailDto;
+import com.butterzhub.muzic.dto.SongDto;
 import com.butterzhub.muzic.dto.SavePlaylistRequest;
 import com.butterzhub.muzic.dto.SavedPlaylistDto;
 import com.butterzhub.muzic.model.Playlist;
@@ -42,6 +44,15 @@ public class PlaylistService {
 
     @Transactional(readOnly = true)
     public UUID authenticatedUserId(OAuth2AuthenticationToken auth) { return user(auth).getId(); }
+
+    @Transactional(readOnly = true)
+    public List<PlaylistDetailDto> list(OAuth2AuthenticationToken auth) {
+        return playlists.findByUserId(user(auth).getId()).stream()
+            .sorted(java.util.Comparator.comparing(Playlist::getCreatedAt).reversed())
+            .map(p -> new PlaylistDetailDto(p.getId(), p.getName(), p.getYoutubePlaylistId(),
+                p.getSongs().stream().map(s -> new SongDto(s.getTitle(), s.getArtist(),
+                    s.getYoutubeVideoId(), s.getThumbnailUrl())).toList())).toList();
+    }
 
     public SavedPlaylistDto save(OAuth2AuthenticationToken auth, SavePlaylistRequest request) {
         Playlist playlist = new Playlist();

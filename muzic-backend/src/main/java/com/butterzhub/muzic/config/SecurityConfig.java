@@ -2,6 +2,7 @@ package com.butterzhub.muzic.config;
 
 import com.butterzhub.muzic.model.User;
 import com.butterzhub.muzic.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -28,6 +29,9 @@ public class SecurityConfig {
     private final ClientRegistrationRepository registrations;
     private final ObjectMapper json;
 
+    @Value("${frontend.url:http://localhost:4200}")
+    private String frontendUrl;
+
     public SecurityConfig(UserRepository users, ClientRegistrationRepository registrations, ObjectMapper json) {
         this.users = users;
         this.registrations = registrations;
@@ -42,7 +46,8 @@ public class SecurityConfig {
             parameters.put("prompt", "consent");
         }));
         CorsConfiguration cors = new CorsConfiguration();
-        cors.setAllowedOrigins(List.of("http://localhost:4200"));
+        cors.setAllowedOrigins(java.util.stream.Stream.of("http://localhost:4200", frontendUrl)
+            .distinct().toList());
         cors.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
         cors.setAllowedHeaders(List.of("Content-Type"));
         cors.setAllowCredentials(true);
@@ -51,7 +56,7 @@ public class SecurityConfig {
         return http
             .cors(config -> config.configurationSource(source))
             .authorizeHttpRequests(rules -> rules
-                .requestMatchers("/api/recommend", "/", "/error", "/login/**", "/oauth2/**").permitAll()
+                .requestMatchers("/api/recommend", "/api/me", "/api/discovery/trending", "/", "/error", "/login/**", "/oauth2/**").permitAll()
                 .requestMatchers("/api/playlists/**", "/api/youtube/**").authenticated()
                 .anyRequest().denyAll())
             // Allow session-authenticated API writes from Postman and browser dev tools without a CSRF token.
@@ -72,8 +77,7 @@ public class SecurityConfig {
                 user.setName(auth.getPrincipal().getAttribute("name"));
                 user.setPictureUrl(auth.getPrincipal().getAttribute("picture"));
                 users.save(user);
-                response.setContentType("application/json");
-                response.getWriter().write("{\"authenticated\":true}");
+                response.sendRedirect(frontendUrl);
             }))
             .build();
     }
