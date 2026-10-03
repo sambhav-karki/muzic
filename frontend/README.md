@@ -17,6 +17,16 @@ Open http://localhost:4200. Start Spring Boot separately on http://localhost:808
 
 For deployment, set VITE_API_BASE_URL to the backend's public URL in Vercel before building, and set FRONTEND_URL to the frontend's origin in the backend environment (without a trailing slash). FRONTEND_URL controls the OAuth success redirect and is allowed by CORS alongside http://localhost:4200. Register the deployed backend's `/login/oauth2/code/google` URL with Google. Build the backend container with `muzic-backend` as the Docker build context; it listens on port 8080.
 
+Production environment values:
+
+- Render: `FRONTEND_URL=https://butterzmuzic.vercel.app`
+- Vercel: `VITE_API_BASE_URL=https://muzic-i6fz.onrender.com`
+- Google OAuth authorized redirect URI: `https://muzic-i6fz.onrender.com/login/oauth2/code/google`
+
+The backend session cookie uses `SameSite=None; Secure; HttpOnly`, and all frontend API requests use `credentials: 'include'`. Redeploy the backend after changing cookie configuration, rebuild the frontend after changing VITE_API_BASE_URL, and sign in again to obtain a fresh session cookie. In browser DevTools, confirm the OAuth callback sets JSESSIONID with these attributes and that `/api/me` sends it and returns `authenticated: true`. Browsers that block third-party cookies entirely may still prevent this flow; using frontend and API custom domains under the same site avoids that restriction.
+
+For local HTTP development where Secure cookies are rejected, override `SERVER_SERVLET_SESSION_COOKIE_SECURE=false` and `SERVER_SERVLET_SESSION_COOKIE_SAME_SITE=lax` in the backend environment. Keep the production settings for HTTPS deployment.
+
 ```powershell
 npm run build
 npm run lint
