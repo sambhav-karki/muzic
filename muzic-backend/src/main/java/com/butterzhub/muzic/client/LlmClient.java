@@ -7,21 +7,23 @@ import org.springframework.web.client.RestClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
-import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.RestClientResponseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.nio.charset.StandardCharsets;
 
 // @Component makes this Gemini adapter available for constructor injection.
 @Component
 public class LlmClient {
 
     private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
+    private static final String DEFAULT_MODEL = "gemini-1.5-flash";
     private static final List<String> BACKUP_MODELS = List.of(
-            "gemini-flash-latest", "gemini-2.5-pro", "gemini-1.5-flash");
+            DEFAULT_MODEL, "gemini-2.0-flash");
 
     private static final String SYSTEM_PROMPT = """
             Act as a music curator. Recommend exactly 3 distinct, specific songs
@@ -41,8 +43,8 @@ public class LlmClient {
     @Value("${gemini.api.key:}")
     private String apiKey;
 
-    @Value("${gemini.model:gemini-2.5-flash}")
-    private String primaryModel = "gemini-2.5-flash";
+    @Value("${gemini.model:gemini-1.5-flash}")
+    private String primaryModel = DEFAULT_MODEL;
 
     private final RestClient restClient;
 
@@ -81,7 +83,7 @@ public class LlmClient {
 
             List<String> models = new ArrayList<>();
             models.add(primaryModel == null || primaryModel.isBlank()
-                    ? "gemini-2.5-flash" : primaryModel.trim());
+                    ? DEFAULT_MODEL : primaryModel.trim());
             for (String model : BACKUP_MODELS) {
                 if (!models.contains(model)) {
                     models.add(model);
@@ -92,16 +94,28 @@ public class LlmClient {
             for (String model : models) {
                 try {
                     response = restClient.post()
-                            .uri("/models/{model}:generateContent", model)
-                            .header("X-goog-api-key", apiKey.trim())
+                            .uri(uri -> uri.path("/models/{model}:generateContent")
+                                    .queryParam("key", "{apiKey}")
+                                    .build(model, apiKey.trim()))
                             .contentType(MediaType.APPLICATION_JSON)
                             .body(request)
                             .retrieve()
+                            .onStatus(status -> status.value() != 200, (httpRequest, httpResponse) -> {
+                                throw new RestClientResponseException(
+                                        "Gemini returned a non-200 response",
+                                        httpResponse.getStatusCode().value(), httpResponse.getStatusText(),
+                                        httpResponse.getHeaders(), httpResponse.getBody().readAllBytes(),
+                                        StandardCharsets.UTF_8);
+                            })
                             .body(String.class);
                     break;
-                } catch (HttpStatusCodeException ex) {
+                } catch (RestClientResponseException ex) {
                     int status = ex.getStatusCode().value();
-                    logger.warn("Gemini model {} failed with HTTP {}", model, status);
+                    String errorBody = ex.getResponseBodyAsString();
+                    // Never expose the credential if the provider echoes it in an error response.
+                    errorBody = errorBody.replace(apiKey.trim(), "[REDACTED]");
+                    logger.warn("Gemini model {} failed with HTTP {}; response body: {}",
+                            model, status, errorBody);
                     if (status != 503 && status != 429 && status != 404) {
                         return FALLBACK_SONGS;
                     }
