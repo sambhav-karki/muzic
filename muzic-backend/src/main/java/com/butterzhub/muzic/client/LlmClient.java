@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.RestClientException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,9 +22,23 @@ import java.nio.charset.StandardCharsets;
 public class LlmClient {
 
     private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
-    private static final String DEFAULT_MODEL = "gemini-1.5-flash";
-    private static final List<String> BACKUP_MODELS = List.of(
-            DEFAULT_MODEL, "gemini-2.0-flash");
+    private static final List<String> MODELS = List.of(
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-3-flash",
+            "gemini-3.5-flash",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-3.8-flash",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash",
+            "gemini-1.5-flash-8b",
+            "gemma-4-31b-it",
+            "gemma-4-26b-it",
+            "gemini-1.5-pro");
 
     private static final String SYSTEM_PROMPT = """
             Act as a music curator. Recommend exactly 3 distinct, specific songs
@@ -43,10 +58,7 @@ public class LlmClient {
     @Value("${gemini.api.key:}")
     private String apiKey;
 
-    @Value("${gemini.model:gemini-1.5-flash}")
-    private String primaryModel = DEFAULT_MODEL;
-
-    private final RestClient restClient;
+private final RestClient restClient;
 
     public LlmClient() {
         this(defaultBuilder());
@@ -81,19 +93,9 @@ public class LlmClient {
                             "responseSchema", Map.of("type", "ARRAY", "minItems", 3,
                                     "maxItems", 3, "items", Map.of("type", "STRING"))));
 
-            List<String> models = new ArrayList<>();
-            models.add(primaryModel == null || primaryModel.isBlank()
-                    ? DEFAULT_MODEL : primaryModel.trim());
-            for (String model : BACKUP_MODELS) {
-                if (!models.contains(model)) {
-                    models.add(model);
-                }
-            }
-
-            String response = null;
-            for (String model : models) {
+            for (String model : MODELS) {
                 try {
-                    response = restClient.post()
+                    String response = restClient.post()
                             .uri(uri -> uri.path("/models/{model}:generateContent")
                                     .queryParam("key", "{apiKey}")
                                     .build(model, apiKey.trim()))
@@ -108,63 +110,67 @@ public class LlmClient {
                                         StandardCharsets.UTF_8);
                             })
                             .body(String.class);
-                    break;
-                } catch (RestClientResponseException ex) {
-                    int status = ex.getStatusCode().value();
-                    String errorBody = ex.getResponseBodyAsString();
-                    // Never expose the credential if the provider echoes it in an error response.
-                    errorBody = errorBody.replace(apiKey.trim(), "[REDACTED]");
-                    logger.warn("Gemini model {} failed with HTTP {}; response body: {}",
-                            model, status, errorBody);
-                    if (status != 503 && status != 429 && status != 404) {
-                        return FALLBACK_SONGS;
+                    if (response != null && !response.isBlank()) {
+                        List<String> songs = parseSongs(response);
+                        if (songs != null) {
+                            return songs;
+                        }
                     }
+                    logger.warn("Gemini model {} returned no usable songs", model);
+                } catch (RestClientException ex) {
+                    if (ex instanceof RestClientResponseException responseException) {
+                        logger.warn("Gemini model {} failed with HTTP {}", model,
+                                responseException.getStatusCode().value());
+                    } else {
+                        logger.warn("Gemini model {} failed ({})", model, ex.getClass().getSimpleName());
+                    }
+                } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+                    logger.warn("Gemini model {} returned invalid JSON", model);
                 }
             }
-
-            if (response == null || response.isBlank()) {
-                logger.warn("Gemini model chain exhausted or returned an empty response; using starter songs");
-                return FALLBACK_SONGS;
-            }
-
-            JsonNode candidate = JSON.readTree(response).path("candidates").path(0);
-            if (!"STOP".equals(candidate.path("finishReason").asText())) {
-                return FALLBACK_SONGS;
-            }
-
-            // A candidate can contain multiple text parts; omit any thinking parts.
-            StringBuilder text = new StringBuilder();
-            for (JsonNode part : candidate.path("content").path("parts")) {
-                if (!part.path("thought").asBoolean(false) && part.path("text").isTextual()) {
-                    text.append(part.path("text").asText());
-                }
-            }
-            if (text.toString().isBlank()) {
-                return FALLBACK_SONGS;
-            }
-
-            JsonNode songs = JSON.readTree(text.toString());
-            if (!songs.isArray() || songs.size() != 3) {
-                return FALLBACK_SONGS;
-            }
-            List<String> searches = new ArrayList<>(3);
-            for (JsonNode song : songs) {
-                if (!song.isTextual() || song.asText().isBlank()) {
-                    return FALLBACK_SONGS;
-                }
-                String search = song.asText().trim();
-                int separator = search.indexOf(" - ");
-                if (separator <= 0 || search.substring(separator + 3).isBlank()
-                        || searches.stream().anyMatch(search::equalsIgnoreCase)) {
-                    return FALLBACK_SONGS;
-                }
-                searches.add(search);
-            }
-            return List.copyOf(searches);
-
+            logger.warn("All 16 models exhausted, reverting to starter songs");
+            return FALLBACK_SONGS;
         } catch (Exception ex) {
             logger.warn("Gemini recommendation failed ({}); using starter songs", ex.getClass().getSimpleName());
             return FALLBACK_SONGS;
         }
+    }
+
+    private List<String> parseSongs(String response) throws com.fasterxml.jackson.core.JsonProcessingException {
+        JsonNode candidate = JSON.readTree(response).path("candidates").path(0);
+        if (!"STOP".equals(candidate.path("finishReason").asText())) {
+            return null;
+        }
+
+        // A candidate can contain multiple text parts; omit any thinking parts.
+        StringBuilder text = new StringBuilder();
+        for (JsonNode part : candidate.path("content").path("parts")) {
+            if (!part.path("thought").asBoolean(false) && part.path("text").isTextual()) {
+                text.append(part.path("text").asText());
+            }
+        }
+        if (text.toString().isBlank()) {
+            return null;
+        }
+
+        JsonNode songs = JSON.readTree(text.toString());
+        if (!songs.isArray() || songs.size() != 3) {
+            return null;
+        }
+        List<String> searches = new ArrayList<>(3);
+        for (JsonNode song : songs) {
+            if (!song.isTextual() || song.asText().isBlank()) {
+                return null;
+            }
+            String search = song.asText().trim();
+            int separator = search.indexOf(" - ");
+            if (separator <= 0 || search.substring(separator + 3).isBlank()
+                    || searches.stream().anyMatch(search::equalsIgnoreCase)) {
+                return null;
+            }
+            searches.add(search);
+        }
+        return List.copyOf(searches);
+
     }
 }
