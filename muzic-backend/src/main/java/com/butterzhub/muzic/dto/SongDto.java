@@ -1,9 +1,6 @@
 package com.butterzhub.muzic.dto;
 
-// A Java record is a data carrier with final components and generated accessors,
-// constructor, equals, hashCode, and toString methods.
-// Records reduce DTO boilerplate in Spring Boot and support JSON serialization;
-// these String components make SongDto immutable.
+// Immutable song metadata shared by the client, service, and HTTP response.
 public record SongDto(
         String title,
         String artist,

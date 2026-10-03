@@ -4,65 +4,83 @@
 
 Muzic is a dual-tier full-stack music curation application: a browser frontend and a Spring Boot backend. The backend follows three logical layers; these layers do not imply three independently deployed services.
 
-The current workspace contains a Maven backend under `muzic-backend/`, configured for Java 21 and Spring Boot 4.1.1, with base package `com.butterzhub.muzic`. It currently provides an application bootstrap, application properties, and a context-loading test. Frontend, LLM integration, YouTube integration, and OAuth2 implementation remain planned work.
+The current workspace contains a Maven backend under `muzic-backend/`, configured for Java 21 and Spring Boot, with base package `com.butterzhub.muzic`. The workspace currently contains an application bootstrap, configuration properties, a context-loading test, an end-to-end recommendation flow (`RecommendController` -> `RecommendationService`), and external integration clients (`LlmClient` for Gemini-based structured generation and `YouTubeClient` for metadata resolution via official YouTube Data API v3).
 
-This document is the implementation contract. It defines intended behavior without supplying application implementation code. Dependency additions and implementation must occur only in subsequent requested micro-steps.
+This document is the implementation contract. It defines intended behavior and technical boundaries. Implementation must proceed in discrete, verified micro-steps.
 
-## 1. System Architecture & 3-Tier Layering
+## 1. System Architecture & Layering
 
 ### Deployment and Request Flow
 
-Browser frontend → REST controller → application service → external integration adapter → LLM provider or official YouTube Data API.
-
-Playback follows a separate path: browser frontend → official embedded YouTube IFrame API. The backend returns metadata and video identifiers; the browser embeds the selected videos.
+- Recommendation Flow: Browser frontend → REST controller → application service → external integration adapter (`LlmClient`, `YouTubeClient`) → client receives curated `SongDto` items.
+- Playback Flow: Browser frontend → official embedded YouTube IFrame API. The backend returns metadata and video identifiers; the browser embeds the selected videos.
+- OAuth2 & Sync Flow: Browser frontend → Spring Security OAuth2 Authorization Endpoint → Google OAuth2 Consent → Backend token exchange & user sync → `YouTubeSyncService` (delegated user calls via OAuth2 access token).
 
 ### Tier 1: Controller Layer — HTTP Boundary
 
 - Use `@RestController` for JSON API endpoints.
-- Bind request bodies and query parameters to typed DTOs, applying validation at the HTTP boundary.
+- Bind request bodies and query parameters to typed DTOs, applying validation at the HTTP boundary (`@Valid`, `@NotBlank`).
 - Use `ResponseEntity` to express HTTP status, headers, and typed response bodies.
-- Delegate all curation, matching, orchestration, and playlist retrieval to application services.
-- Return RFC 7807 problem details through Spring `ProblemDetail` with `application/problem+json` for errors.
-- Keep provider payloads, credentials, prompt construction, retries, and business decisions out of controllers.
+- Delegate all curation, matching, orchestration, persistence, and playlist retrieval to application services.
+- Return RFC 7807 problem details through Spring `ProblemDetail` with `application/problem+json` for errors via `@RestControllerAdvice`.
+- Keep provider payloads, credentials, prompt construction, retries, and persistence entities out of controllers.
 
 ### Tier 2: Service Layer — Application and Business Logic
 
-- Own the recommendation workflow and LLM prompt engineering for exactly 10 distinct songs.
+- Own the recommendation workflow and LLM prompt engineering for curated song outputs.
 - Treat the user's prompt as input data. Keep application instructions separate and require structured title/artist output; the LLM must not invent YouTube IDs or thumbnail URLs.
 - Validate the model response, reject malformed candidates, and deduplicate songs before resolving videos.
-- Orchestrate YouTube searches, select appropriate embeddable video matches, and preserve the final curation order.
+- Orchestrate YouTube searches, select appropriate embeddable video matches, and preserve curation order.
 - Obtain `youtubeVideoId` and `thumbnailUrl` from official YouTube API metadata.
-- Use bounded retries and replacement candidates when a song cannot be resolved. A successful recommendation returns exactly 10 resolved songs; exhaustion produces a problem response instead of silently returning an incomplete list.
-- Own OAuth2 playlist retrieval decisions, authorization requirements, provider failure translation, and operation-level timeout budgets.
+- Provide deterministic fallback handling on external provider outages.
+- Own OAuth2 playlist retrieval and synchronization logic, authorization requirements, provider failure translation, and operation-level timeout budgets.
+- Manage database transactions using `@Transactional` at the service boundary. Never leak JPA entities directly to the presentation tier; map entities to typed DTOs.
 
 ### Tier 3: Integration Layer — External Provider Adapters
 
-- Encapsulate LLM and YouTube HTTP clients behind dedicated interfaces and adapters.
-- Own provider authentication, request serialization, response parsing, timeouts, and transport error handling.
+- Encapsulate LLM and YouTube HTTP clients behind dedicated adapters (`LlmClient`, `YouTubeClient`, `YouTubeSyncClient`).
+- Own provider authentication, request serialization, response parsing, timeouts, and transport error handling via Spring Boot 3 `RestClient`.
+- Use header-based authentication (`X-goog-api-key`) for Google Generative Language API calls.
+- Use query-parameter or header API key authentication for public YouTube Data API v3 queries.
+- Use user-delegated Bearer access tokens (`Authorization: Bearer <token>`) for authenticated YouTube Data API operations (e.g., creating playlists, inserting playlist items).
 - Translate provider responses into internal immutable values; avoid exposing provider-specific schemas through public APIs.
-- Use bounded concurrency and quota-aware retries. Retry only transient failures within the operation budget; avoid blind retries for authorization failures or exhausted quota.
-- Keep provider secrets and OAuth2 tokens server-side, supplied through environment configuration or a secret store.
-- No persistence tier is required by this initial contract. Any future storage must have its own repository boundary and an explicit data-retention design.
+
+### Tier 4: Persistence Tier — PostgreSQL & Spring Data JPA
+
+- Manage relational persistence via PostgreSQL and Spring Data JPA.
+- Relational schema requirements:
+  - `User`: Primary key `UUID id`, unique `googleId`, `email`, `name`, `pictureUrl`.
+  - `Playlist`: Primary key `UUID id`, `@ManyToOne(fetch = FetchType.LAZY) User user`, `name`, `youtubePlaylistId` (nullable, populated on sync), `createdAt` (`Instant`).
+  - `PlaylistSong`: Primary key `UUID id`, `@ManyToOne(fetch = FetchType.LAZY) Playlist playlist`, `title`, `artist`, `youtubeVideoId`, `thumbnailUrl`, `position` (`Integer`).
+- Repositories must extend `JpaRepository` and expose targeted queries (`findByGoogleId`, `findByUserId`).
+- Database modifications must be transactional and use standard dialect-compatible constraints.
 
 ### Client Integration — Embedded YouTube Playback
 
 - Use the official frontend YouTube IFrame API with backend-provided video IDs.
 - Perform zero media scraping, audio extraction, proxy streaming, or media downloading.
-- Preserve YouTube player controls, attribution, embedding restrictions, and required player behavior. Follow applicable YouTube API terms and policies; using an iframe alone does not establish compliance.
-- Handle unavailable videos and embedding restrictions gracefully in the frontend.
-- Configure CORS for approved frontend origins. Never expose backend API keys or OAuth2 refresh tokens to the browser.
+- Preserve YouTube player controls, attribution, embedding restrictions, and required player behavior. Follow applicable YouTube API terms and policies.
+- Configure CORS for approved frontend origins (e.g., `http://localhost:4200`). Never expose backend API keys, OAuth2 client secrets, or refresh tokens to the browser.
 
-## 2. API Contracts
+## 2. API & Security Contracts
 
-All routes are rooted at `/api`. Successful JSON responses use `application/json`; error responses use `application/problem+json`. Required strings must be non-null and non-blank after trimming. Define finite input-length and request-rate limits during implementation and document them before release.
+All REST routes are rooted at `/api`. Successful JSON responses use `application/json`; error responses use `application/problem+json`.
+
+### Authentication & OAuth2 Endpoints
+
+- Handled via `spring-boot-starter-oauth2-client`.
+- Provider: Google Identity Platform.
+- Scopes: `openid`, `profile`, `email`, `https://www.googleapis.com/auth/youtube`.
+- Authentication Mechanism: Standard OAuth2 authorization code flow with secure session/cookie or token exchange.
+- Token Retention: Persist user identifiers and manage OAuth2 authorized client tokens to execute delegated YouTube operations.
 
 ### POST /api/recommend
 
-**Purpose:** Curate and resolve 10 songs from a natural-language mood, genre, activity, or preference prompt.
+**Purpose:** Curate and resolve songs from a natural-language mood, genre, activity, or preference prompt.
 
 **Request:** `{ "prompt": string }`
 
-**Success:** `200 OK` with a JSON array of exactly 10 objects, each shaped as `{ "title": string, "artist": string, "youtubeVideoId": string, "thumbnailUrl": string }`.
+**Success:** `200 OK` with a JSON array of objects, each shaped as `{ "title": string, "artist": string, "youtubeVideoId": string, "thumbnailUrl": string }`.
 
 | Field | Contract |
 | --- | --- |
@@ -71,67 +89,67 @@ All routes are rooted at `/api`. Successful JSON responses use `application/json
 | `youtubeVideoId` | Verified video identifier returned by YouTube, suitable for an attempted embed. |
 | `thumbnailUrl` | HTTPS thumbnail URL obtained from YouTube metadata. |
 
-Results are distinct by song identity and video ID. Do not add a response envelope or provider-only fields. Request processing completes within a bounded timeout and returns a problem response when 10 valid results cannot be produced.
+### POST /api/playlists
 
-### GET /api/youtube/search?query=...
+**Purpose:** Save a curated playlist to the user's account in PostgreSQL.
 
-**Purpose:** Search the official YouTube Data API for music video candidates.
+**Authorization:** Authenticated user session.
 
-**Request:** Required URL-encoded `query` parameter containing a non-blank search string.
+**Request:** `{ "name": string, "songs": [ { "title": string, "artist": string, "youtubeVideoId": string, "thumbnailUrl": string } ] }`
 
-**Success:** `200 OK` with a bounded JSON array using the same `{ title, artist, youtubeVideoId, thumbnailUrl }` shape as recommendations. No matches returns `[]`. Return video results only and apply available embedding filters.
+**Success:** `201 Created` returning the saved playlist DTO with its generated `id` and item count.
 
-Search titles and artist attribution may be ambiguous. Use the video's title and a best-effort artist attribution; when attribution is unavailable, use the channel display name. Do not represent inferred attribution as verified song metadata. A search result does not guarantee future playback availability.
+### POST /api/playlists/{id}/sync-youtube
+
+**Purpose:** Export a saved local playlist to the authenticated user's personal YouTube account.
+
+**Authorization:** Authenticated user session with authorized `https://www.googleapis.com/auth/youtube` scope.
+
+**Success:** `200 OK` returning `{ "playlistId": string, "youtubePlaylistId": string, "synced": true }`.
 
 ### GET /api/youtube/playlists
 
 **Purpose:** Retrieve the authenticated user's own YouTube playlists through delegated OAuth2 access.
 
-**Authorization:** Require an authenticated application session associated with the user's Google OAuth2 grant and the minimum read-only YouTube scope needed. Keep the authorization flow, callback, token refresh, and encrypted token storage behind a dedicated security boundary. Finalize those routes before implementing this endpoint.
-
-**Request:** No required query parameters. Permit optional `pageToken` for opaque provider pagination.
+**Authorization:** Authenticated application session associated with the user's Google OAuth2 grant.
 
 **Success:** `200 OK` with `{ "items": [ { "playlistId": string, "title": string, "description": string, "thumbnailUrl": string | null } ], "nextPageToken": string | null }`.
 
-Return only playlists owned by the authenticated user. An empty collection returns `items: []`. Preserve opaque pagination tokens; do not expose access or refresh tokens. Missing playlist thumbnails are represented by `null`.
-
 ### Shared Error Contract
 
-Problem responses contain `type`, `title`, `status`, `detail`, and `instance`. Use stable problem identifiers; ensure `status` agrees with the HTTP status. Optional extensions may include a safe `traceId` and field-validation errors. Never expose stack traces, credentials, raw provider payloads, or sensitive prompt content.
+Problem responses contain `type`, `title`, `status`, `detail`, and `instance` (RFC 7807).
 
 | Status | Intended condition |
 | --- | --- |
-| `400` | Invalid body, malformed JSON, missing or blank required input, or invalid pagination input. |
-| `401` | Missing or expired application authentication for user playlist access. |
-| `403` | Insufficient delegated scope or denied access to an authenticated operation. |
-| `429` | Application request-rate limit reached; include `Retry-After` when known. |
-| `502` | Invalid upstream response or exhausted curation resolution attempts. |
-| `503` | Temporary provider unavailability or provider quota exhaustion; include `Retry-After` when known. |
-| `504` | Upstream operation exceeded its timeout budget. |
-| `500` | Unexpected internal failure, with a safe generic detail. |
-
-Translate provider-specific status codes according to these application meanings; a backend API-key failure must not appear as a user's authentication failure.
+| `400` | Invalid body, malformed JSON, missing or blank required input, or validation constraint failure. |
+| `401` | Missing, invalid, or expired session/authentication token. |
+| `403` | Insufficient delegated OAuth2 scopes (e.g., missing YouTube write permission). |
+| `404` | Target resource (playlist, user) not found. |
+| `429` | Rate limit reached or upstream API quota exhausted. |
+| `502` | Invalid upstream response from Google AI Studio or YouTube API. |
+| `503` | Upstream provider unavailability. |
+| `500` | Unexpected internal server error. |
 
 ## 3. Enterprise Engineering Rules
 
-- Use Java 21 Records for immutable request, response, and integration DTOs. Defensively copy collection components where necessary; records alone do not make nested mutable values immutable.
-- Use `@RestControllerAdvice` for global exception handling, consistent `ProblemDetail` construction, and validation error translation.
-- Enforce strict separation of concerns: controllers handle HTTP; services handle business logic; integration adapters handle external transport. Controllers must contain no business logic.
-- Use constructor injection and configuration properties for explicit dependencies and environment-specific settings.
-- Keep transport DTOs separate from provider schemas and future persistence entities. Maintain packages beneath `com.butterzhub.muzic` organized by responsibility.
-- Validate and constrain untrusted input, LLM output, and provider responses. Do not execute generated content or accept user-supplied provider URLs.
-- Protect API keys and OAuth2 tokens, redact sensitive logs, and bind delegated access to the correct authenticated user.
-- Provide structured logs and correlation identifiers for diagnosis; record latency and failure categories without logging secrets or sensitive prompt content by default.
-- Verify service behavior with isolated provider substitutes, controller contracts with HTTP-boundary tests, and integration parsing/error handling with controlled fixtures. Cover the exact-10 invariant, deduplication, failed matching, validation, OAuth2 failures, pagination, quota handling, and timeouts as those behaviors are implemented.
-- Do not add frameworks, dependencies, storage, or unrelated features merely to satisfy speculative future needs. Confirm required capabilities against the workspace's Spring Boot and Java baseline before each implementation step.
+- Use Java 21 Records for immutable request, response, and external integration DTOs.
+- Keep transport DTOs separate from JPA entities and external API schemas. Never use JPA entities as controller arguments or return values.
+- Maintain packages beneath `com.butterzhub.muzic`:
+  - `.controller`: Web ingress, request validation, HTTP status mapping.
+  - `.service`: Business logic, transaction orchestration, domain transformations.
+  - `.client`: Outbound REST integrations (`RestClient`).
+  - `.model`: JPA entities.
+  - `.repository`: Spring Data JPA interfaces.
+  - `.dto`: Immutable Java records for API transport.
+  - `.exception`: Global exception advice and custom domain exceptions.
+  - `.config`: Security, CORS, and client bean configurations.
+- Use constructor injection exclusively across all components.
+- Secure secrets: Google OAuth client secrets, Gemini API keys, and YouTube API keys must be loaded via environment variables or external configuration, never hardcoded.
 
 ## 4. Codex Micro-Step Directive
 
-- Generate only a single-class snippet at a time. Treat one record, interface, or other top-level Java type as one micro-step.
-- Begin each micro-step with the file path, its responsibility, and the relevant contract it satisfies.
-- Include concise educational comments explaining annotations and framework methods where they appear, such as `@RestController`, request binding, `ResponseEntity`, and `@RestControllerAdvice`. Explain their purpose without narrating obvious syntax.
-- Keep every snippet narrowly scoped and reviewable. State required dependencies and assumptions; do not silently generate supporting classes or an entire feature.
-- For a build or configuration change, provide a separate focused micro-step instead of combining it with multiple application classes.
-- Provide a brief, relevant verification step and identify any unresolved dependency on subsequent micro-steps.
-- Preserve this architecture and the public API shapes across steps. Explicitly identify any proposed contract change before implementing it.
-- The present task authorizes this blueprint only. Do not generate application implementation code until the user requests the next implementation micro-step.
+- Generate only a single-class snippet or configuration block at a time.
+- Begin each step with the file path, responsibility, and contract requirement being satisfied.
+- Include concise educational comments explaining annotations (`@Entity`, `@Table`, `@ManyToOne`, `@Transactional`).
+- For dependency additions (`pom.xml`) or configuration changes (`application.properties`), provide an isolated micro-step prior to application code.
+- Verify each step with compilation checks (`./mvnw clean compile`) before proceeding to downstream components.
