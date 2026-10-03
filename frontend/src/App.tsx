@@ -1,7 +1,7 @@
 ﻿import { useEffect, useState } from 'react'
 import SplashIntro from './components/SplashIntro'
 import MusicDashboard from './components/search/MusicDashboard'
-import { api, GOOGLE_LOGIN_URL } from './services/api'
+import { api, GOOGLE_LOGIN_URL, GUEST_PROFILE } from './services/api'
 import type { Profile } from './services/api'
 import { PlayerProvider, usePlayer } from './components/player/PlayerContext'
 import RetroPlayer from './components/player/RetroPlayer'
@@ -16,7 +16,9 @@ function Dashboard() {
   useEffect(() => { setUserId(profile?.authenticated ? profile.id : null) }, [profile, setUserId])
   useEffect(() => {
     const controller = new AbortController()
-    api.profile(controller.signal).then(setProfile).catch((reason: unknown) => {
+    api.authStatus(controller.signal)
+      .then(status => status.authenticated ? api.profile(controller.signal) : GUEST_PROFILE)
+      .then(profile => { if (!controller.signal.aborted) setProfile(profile) }).catch((reason: unknown) => {
       if (!controller.signal.aborted) setProfileError(reason instanceof Error ? reason.message : 'Could not check account status.')
     })
     return () => controller.abort()

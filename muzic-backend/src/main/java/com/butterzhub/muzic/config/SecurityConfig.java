@@ -5,6 +5,10 @@ import com.butterzhub.muzic.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.apache.tomcat.util.http.Rfc6265CookieProcessor;
+import org.apache.tomcat.util.http.SameSiteCookies;
+import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
+import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
@@ -39,6 +43,15 @@ public class SecurityConfig {
     }
 
     @Bean
+    public WebServerFactoryCustomizer<TomcatServletWebServerFactory> cookieProcessorCustomizer() {
+        return factory -> factory.addContextCustomizers(context -> {
+            Rfc6265CookieProcessor processor = new Rfc6265CookieProcessor();
+            processor.setSameSiteCookies(SameSiteCookies.NONE.getValue());
+            context.setCookieProcessor(processor);
+        });
+    }
+
+    @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         var resolver = new DefaultOAuth2AuthorizationRequestResolver(registrations, "/oauth2/authorization");
         resolver.setAuthorizationRequestCustomizer(builder -> builder.additionalParameters(parameters -> {
@@ -46,17 +59,18 @@ public class SecurityConfig {
             parameters.put("prompt", "consent");
         }));
         CorsConfiguration cors = new CorsConfiguration();
-        cors.setAllowedOrigins(java.util.stream.Stream.of("http://localhost:4200", frontendUrl)
+        cors.setAllowedOrigins(java.util.stream.Stream.of("https://butterzmuzic.vercel.app",
+            "http://localhost:4200", "http://localhost:5173", frontendUrl)
             .distinct().toList());
-        cors.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
-        cors.setAllowedHeaders(List.of("Content-Type"));
+        cors.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        cors.setAllowedHeaders(List.of("*"));
         cors.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/api/**", cors);
         return http
             .cors(config -> config.configurationSource(source))
             .authorizeHttpRequests(rules -> rules
-                .requestMatchers("/api/recommend", "/api/me", "/api/discovery/trending", "/", "/error", "/login/**", "/oauth2/**").permitAll()
+                .requestMatchers("/api/recommend", "/api/me", "/api/auth/status", "/api/discovery/trending", "/", "/error", "/login/**", "/oauth2/**").permitAll()
                 .requestMatchers("/api/playlists/**", "/api/youtube/**").authenticated()
                 .anyRequest().denyAll())
             // Allow session-authenticated API writes from Postman and browser dev tools without a CSRF token.

@@ -72,6 +72,33 @@ class PlaylistIntegrationTests {
     }
 
     @Test
+    void authStatusDistinguishesGuestsAndAuthenticatedSessions() throws Exception {
+        mvc.perform(get("/api/auth/status")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.authenticated").value(false));
+        mvc.perform(get("/api/auth/status").with(authentication(auth))).andExpect(status().isOk())
+            .andExpect(jsonPath("$.authenticated").value(true));
+    }
+
+    @Test
+    void corsAllowsCredentialedRequestsFromFrontendOrigins() throws Exception {
+        for (String origin : List.of("https://butterzmuzic.vercel.app", "http://localhost:4200", "http://localhost:5173")) {
+            for (String method : List.of("GET", "POST", "PUT", "DELETE", "OPTIONS")) {
+                mvc.perform(options("/api/auth/status")
+                    .header("Origin", origin)
+                    .header("Access-Control-Request-Method", method)
+                    .header("Access-Control-Request-Headers", "Content-Type,X-Requested-With"))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Access-Control-Allow-Origin", origin))
+                    .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+            }
+        }
+        mvc.perform(options("/api/auth/status")
+            .header("Origin", "https://untrusted.example")
+            .header("Access-Control-Request-Method", "GET"))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
     void profileDistinguishesGuestsAndAuthenticatedUsers() throws Exception {
         mvc.perform(get("/api/me")).andExpect(status().isOk())
             .andExpect(jsonPath("$.authenticated").value(false));
