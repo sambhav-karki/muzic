@@ -69,10 +69,10 @@ public class SecurityConfig {
         source.registerCorsConfiguration("/api/**", cors);
         return http
             .cors(config -> config.configurationSource(source))
-            .authorizeHttpRequests(rules -> rules
-                .requestMatchers("/api/recommend", "/api/me", "/api/auth/status", "/api/discovery/trending", "/", "/error", "/login/**", "/oauth2/**").permitAll()
-                .requestMatchers("/api/playlists/**", "/api/youtube/**").authenticated()
-                .anyRequest().denyAll())
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/api/auth/status").permitAll()
+                .requestMatchers("/", "/error", "/oauth2/**", "/login/**").permitAll()
+                .anyRequest().authenticated())
             // Allow session-authenticated API writes from Postman and browser dev tools without a CSRF token.
             .csrf(csrf -> csrf.disable())
             .exceptionHandling(errors -> errors
