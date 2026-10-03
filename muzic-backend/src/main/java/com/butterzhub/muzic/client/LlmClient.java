@@ -38,10 +38,6 @@ public class LlmClient {
             ["Artist - Song Title", "Artist - Song Title", "Artist - Song Title"].
             Do not include markdown fences (```json), commentary, or conversational text.
             """;
-    private static final List<String> FALLBACK_SONGS = List.of(
-            "Tycho - Awake",
-            "Lofi Fruits Music - Chill Lofi Study",
-            "Miles Davis - So What");
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     // @Value keeps the provider credential in external configuration.
@@ -71,7 +67,7 @@ public class LlmClient {
     public List<String> suggestSongs(String prompt) {
         try {
             if (prompt == null || prompt.isBlank() || apiKey == null || apiKey.isBlank()) {
-                return FALLBACK_SONGS;
+                return FallbackTracks.queries(prompt);
             }
 
             // Keep trusted instructions separate from the user's preferences.
@@ -119,10 +115,10 @@ public class LlmClient {
                 }
             }
             logger.warn("All {} models exhausted, reverting to starter songs", MODELS.size());
-            return FALLBACK_SONGS;
+            return FallbackTracks.queries(prompt);
         } catch (Exception ex) {
             logger.warn("Gemini recommendation failed ({}); using starter songs", ex.getClass().getSimpleName());
-            return FALLBACK_SONGS;
+            return FallbackTracks.queries(prompt);
         }
     }
 

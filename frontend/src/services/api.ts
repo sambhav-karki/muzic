@@ -1,4 +1,4 @@
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+export const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080').replace(/\/+$/, '')
 export const GOOGLE_LOGIN_URL = `${API_BASE}/oauth2/authorization/google`
 
 export interface Song { title: string; artist: string; youtubeVideoId: string; thumbnailUrl: string | null }
@@ -38,6 +38,7 @@ export const api = {
   trending: (signal?: AbortSignal) => request<Song[]>('/api/discovery/trending', { signal }),
   profile: (signal?: AbortSignal) => request<Profile>('/api/me', { signal }),
   playlists: (signal?: AbortSignal) => request<YouTubePlaylist[]>('/api/playlists', { signal }),
+  playlistItems: (id: string, signal?: AbortSignal) => request<Song[]>('/api/playlists/' + encodeURIComponent(id) + '/items', { signal }),
   createPlaylist: (title: string) => request<YouTubePlaylist>('/api/playlists', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, description: '', privacyStatus: 'private' }) }),
   addToPlaylist: (id: string, videoId: string) => request<void>('/api/playlists/' + encodeURIComponent(id) + '/items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ videoId }) }),
   recommend: (prompt: string, signal?: AbortSignal) => request<Song[]>('/api/recommend', {

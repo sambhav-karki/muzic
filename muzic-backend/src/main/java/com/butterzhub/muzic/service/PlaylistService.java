@@ -103,6 +103,10 @@ public class PlaylistService {
         user(auth);
         youtube.insertTrack(auth, playlistId, videoId);
     }
+    public List<SongDto> importYouTubeTracks(OAuth2AuthenticationToken auth, String playlistId) {
+        user(auth);
+        return youtube.fetchPlaylistItems(auth, playlistId);
+    }
     public List<PlaylistDto> importYouTubePlaylists(OAuth2AuthenticationToken auth) {
         User user = user(auth);
         List<PlaylistDto> remote = youtube.fetchUserPlaylists(auth);

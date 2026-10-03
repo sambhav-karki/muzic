@@ -83,6 +83,17 @@ class YouTubeClientTests {
     }
 
     @Test
+    void retriesAnEmptyLookupWithOfficialAudioQuery() {
+        server.expect(anything()).andRespond(withSuccess("{\"items\":[]}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://www.youtube.com/results?search_query=jazz")).andRespond(withSuccess("<html></html>", MediaType.TEXT_HTML));
+        server.expect(queryParam("q", "jazz%20official%20audio")).andRespond(withSuccess(
+            "{\"items\":[{\"id\":{\"videoId\":\"abcDEFG_123\"}}]}", MediaType.APPLICATION_JSON));
+        expectVideo("https://i.ytimg.com/vi/abcDEFG_123/hqdefault.jpg");
+        assertEquals("abcDEFG_123", client.searchSong("jazz").youtubeVideoId());
+        server.verify();
+    }
+
+    @Test
     void missingKeyAvoidsNetwork() {
         ReflectionTestUtils.setField(client, "apiKey", "");
         assertSkipped();
@@ -120,7 +131,7 @@ class YouTubeClientTests {
     }
 
     private void assertSkipped() {
-        assertNull(client.searchSong("jazz"));
+        assertNull(client.searchSongOnce("jazz"));
         server.verify();
     }
 

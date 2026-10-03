@@ -20,6 +20,22 @@ public class YouTubeClient {
     private String apiKey;
 
     private final RestClient restClient;
+    private final java.util.concurrent.ConcurrentHashMap<String, SongDto> songCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentHashMap<String, List<SongDto>> webCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile long quotaRetryAfter;
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON = new com.fasterxml.jackson.databind.ObjectMapper();
+
+    private boolean useWebSearch() {
+        return apiKey == null || apiKey.isBlank() || System.currentTimeMillis() < quotaRetryAfter;
+    }
+    private void rememberQuotaFailure(RestClientException failure) {
+        if (failure instanceof org.springframework.web.client.RestClientResponseException response
+            && response.getStatusCode().value() == 403 && (response.getResponseBodyAsString().contains("quotaExceeded")
+                || response.getResponseBodyAsString().contains("dailyLimitExceeded")))
+            quotaRetryAfter = System.currentTimeMillis() + java.util.concurrent.TimeUnit.MINUTES.toMillis(30);
+    }
+    private static String cacheKey(String query) { return query.trim().toLowerCase(java.util.Locale.ROOT); }
+
 
     public YouTubeClient() {
         this(defaultBuilder());
@@ -36,7 +52,7 @@ public class YouTubeClient {
         this.restClient = builder.clone().baseUrl("https://www.googleapis.com/youtube/v3").build();
     }
 
-    // Null means no verified match; RecommendationService omits that suggestion.
+    // Trending still uses videos.list; search can fall back to public results.
     public List<SongDto> trendingMusic() {
         if (apiKey == null || apiKey.isBlank()) throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "Trending music requires YOUTUBE_API_KEY on the backend.");
@@ -71,9 +87,7 @@ public class YouTubeClient {
         if (query == null || query.isBlank() || query.length() > 500)
             throw new org.springframework.web.server.ResponseStatusException(
                 org.springframework.http.HttpStatus.BAD_REQUEST, "Query must contain 1 to 500 characters.");
-        if (apiKey == null || apiKey.isBlank())
-            throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "Music search requires YOUTUBE_API_KEY on the backend.");
+        if (useWebSearch()) return searchWebResults(query);
         try {
             Map<String, Object> response = restClient.get()
                 .uri("/search?part=snippet&type=video&videoCategoryId=10&maxResults=10&videoEmbeddable=true&videoSyndicated=true&q={query}&key={key}", query.trim(), apiKey)
@@ -99,14 +113,27 @@ public class YouTubeClient {
                 songs.add(new SongDto(title, artist, id, thumbnail));
                 if (songs.size() == 3) break;
             }
-            return List.copyOf(songs);
+            return songs.isEmpty() ? searchWebResults(query) : List.copyOf(songs);
         } catch (RestClientException | IllegalArgumentException exception) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.BAD_GATEWAY, "YouTube music search is unavailable. Check the API key and quota, then retry.");
+            if (exception instanceof RestClientException failure) rememberQuotaFailure(failure);
+            return searchWebResults(query);
         }
     }
 
     public SongDto searchSong(String query) {
+        if (query == null || query.isBlank() || query.length() > 500) return null;
+        String key = cacheKey(query);
+        SongDto cached = songCache.get(key);
+        if (cached != null) return cached;
+        for (String variant : List.of(query.trim(), query.trim() + " official audio", query.replace(" - ", " ") + " music")) {
+            SongDto song = useWebSearch() ? null : searchSongOnce(variant);
+            if (song == null) song = searchViaWebScrape(variant);
+            if (song != null) { songCache.put(key, song); return song; }
+        }
+        return null;
+    }
+
+    SongDto searchSongOnce(String query) {
         if (query == null || query.isBlank() || apiKey == null || apiKey.isBlank()) {
             return null;
         }
@@ -157,9 +184,82 @@ public class YouTubeClient {
                 }
             }
         } catch (RestClientException | IllegalArgumentException exception) {
-            // Skip unresolved suggestions rather than returning an unverified static ID.
+            if (exception instanceof RestClientException failure) rememberQuotaFailure(failure);
         }
         return null;
+    }
+
+    public SongDto searchViaWebScrape(String query) {
+        List<SongDto> songs = searchWebResults(query);
+        return songs.isEmpty() ? null : songs.get(0);
+    }
+
+    private List<SongDto> searchWebResults(String query) {
+        if (query == null || query.isBlank() || query.length() > 550) return List.of();
+        String key = cacheKey(query);
+        List<SongDto> cached = webCache.get(key);
+        if (cached != null) return cached;
+        try {
+            String html = restClient.get()
+                .uri("https://www.youtube.com/results?search_query={query}", query.trim())
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Accept", "text/html")
+                .retrieve().body(String.class);
+            List<SongDto> songs = parseWebResults(html, query);
+            if (!songs.isEmpty()) {
+                if (webCache.size() >= 2000) webCache.clear();
+                if (songCache.size() >= 2000) songCache.clear();
+                webCache.put(key, songs); songCache.put(key, songs.get(0));
+            }
+            return songs;
+        } catch (RestClientException | IllegalArgumentException failure) { return List.of(); }
+    }
+
+    // Match renderer boundaries rather than pairing unrelated page-wide ID/title matches.
+    static List<SongDto> parseWebResults(String html, String query) {
+        if (html == null || html.isBlank()) return List.of();
+        var songs = new java.util.ArrayList<SongDto>();
+        var seen = new java.util.HashSet<String>();
+        var matcher = java.util.regex.Pattern.compile("\"videoRenderer\"\\s*:\\s*\\{").matcher(html);
+        while (matcher.find() && songs.size() < 3) {
+            int start = matcher.end() - 1;
+            int depth = 0; boolean quoted = false, escaped = false;
+            for (int end = start; end < html.length(); end++) {
+                char c = html.charAt(end);
+                if (quoted) {
+                    if (escaped) escaped = false;
+                    else if (c == '\\') escaped = true;
+                    else if (c == '"') quoted = false;
+                    continue;
+                }
+                if (c == '"') quoted = true;
+                else if (c == '{') depth++;
+                else if (c == '}' && --depth == 0) {
+                    try {
+                        var video = JSON.readTree(html.substring(start, end + 1));
+                        String id = video.path("videoId").asText();
+                        String title = rendererText(video.path("title"));
+                        String artist = rendererText(video.path("ownerText"));
+                        if (artist.isBlank()) artist = rendererText(video.path("longBylineText"));
+                        int separator = query.indexOf(" - ");
+                        if (separator > 0) artist = query.substring(0, separator).trim();
+                        if (artist.isBlank()) artist = "YouTube";
+                        if (id.matches("[A-Za-z0-9_-]{11}") && !title.isBlank() && title.length() <= 255
+                            && artist.length() <= 255 && seen.add(id))
+                            songs.add(new SongDto(title, artist, id, "https://i.ytimg.com/vi/" + id + "/hqdefault.jpg"));
+                    } catch (com.fasterxml.jackson.core.JsonProcessingException invalid) { /* Try the next renderer. */ }
+                    break;
+                }
+            }
+        }
+        return List.copyOf(songs);
+    }
+    private static String rendererText(com.fasterxml.jackson.databind.JsonNode node) {
+        if (node.path("simpleText").isTextual()) return node.path("simpleText").asText();
+        var text = new StringBuilder();
+        for (var run : node.path("runs")) text.append(run.path("text").asText());
+        return text.toString();
     }
 
     private static boolean validThumbnail(String url) {

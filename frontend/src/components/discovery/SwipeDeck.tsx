@@ -37,7 +37,7 @@ export default function SwipeDeck({ onLike }: { onLike: (song: Song) => boolean 
   }}>
     {adding && <PlaylistDialog videoId={adding.youtubeVideoId} onClose={() => setAdding(null)} />}
     <p className="deck-source">LIVE YOUTUBE MUSIC / US TRENDING</p>
-    {loading ? <p role="status">LOADING THE NEXT LEVEL...</p> : error ? <div role="alert"><p>{error}</p><button className="pixel-button" onClick={() => { setLoading(true); setError(''); setIndex(0); setRetry(value => value + 1) }}>RETRY</button></div> : song ? <>
+    {loading ? <p role="status">LOADING TRACKS...</p> : error ? <div role="alert"><p>{error}</p><button className="pixel-button" onClick={() => { setLoading(true); setError(''); setIndex(0); setRetry(value => value + 1) }}>RETRY</button></div> : song ? <>
       <div className="trading-card pixel-panel" style={{ transform: `translateX(${Math.max(-100, Math.min(100, drag))}px) rotate(${drag / 28}deg)` }}
         onPointerDown={event => { if ((event.target as HTMLElement).closest('button') || event.button !== 0) return; start.current = { x: event.clientX, y: event.clientY, id: event.pointerId }; event.currentTarget.setPointerCapture(event.pointerId) }}
         onPointerMove={event => { if (start.current?.id === event.pointerId) setDrag(event.clientX - start.current.x) }}

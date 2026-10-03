@@ -51,14 +51,16 @@ class DirectMusicSearchTests {
         server.verify();
     }
 
-    @Test void handlesMissingKeyAndProviderErrorsWithoutInventingSongs() {
+    @Test void missingKeyAndQuotaFailureUsePublicSearch() {
+        server.expect(requestTo("https://www.youtube.com/results?search_query=song"))
+            .andRespond(withSuccess("<html></html>", MediaType.TEXT_HTML));
+        server.expect(anything()).andRespond(withStatus(HttpStatus.FORBIDDEN).body("quotaExceeded"));
+        server.expect(requestTo("https://www.youtube.com/results?search_query=song"))
+            .andRespond(withSuccess("<html></html>", MediaType.TEXT_HTML));
         ReflectionTestUtils.setField(client, "apiKey", "");
-        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException.class,
-            () -> client.searchMusic("song")).getStatusCode());
+        assertTrue(client.searchMusic("song").isEmpty());
         ReflectionTestUtils.setField(client, "apiKey", "test-key");
-        server.expect(anything()).andRespond(withStatus(HttpStatus.FORBIDDEN));
-        assertEquals(HttpStatus.BAD_GATEWAY, assertThrows(ResponseStatusException.class,
-            () -> client.searchMusic("song")).getStatusCode());
+        assertTrue(client.searchMusic("song").isEmpty());
         server.verify();
     }
 }

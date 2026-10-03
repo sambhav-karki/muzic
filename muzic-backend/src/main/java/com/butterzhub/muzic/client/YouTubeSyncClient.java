@@ -182,6 +182,43 @@ public class YouTubeSyncClient {
         return List.copyOf(items);
     }
 
+    public List<com.butterzhub.muzic.dto.SongDto> fetchPlaylistItems(OAuth2AuthenticationToken auth, String playlistId) {
+        if (playlistId == null || !playlistId.matches("[A-Za-z0-9_-]{1,150}"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid playlist ID");
+        String bearer = token(auth);
+        var songs = new ArrayList<com.butterzhub.muzic.dto.SongDto>();
+        var seenPages = new HashSet<String>();
+        var seenVideos = new HashSet<String>();
+        String page = "";
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+        do {
+            if (System.nanoTime() >= deadline)
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "YouTube import time budget reached; retry");
+            String currentPage = page;
+            JsonNode body = call(() -> rest.get().uri(uri -> uri.path("/playlistItems")
+                .queryParam("part", "snippet,contentDetails").queryParam("playlistId", playlistId)
+                .queryParam("maxResults", 50).queryParam("pageToken", currentPage).build())
+                .headers(h -> h.setBearerAuth(bearer)).retrieve().body(JsonNode.class));
+            if (body == null || !body.path("items").isArray())
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Invalid YouTube tracks response");
+            for (JsonNode item : body.path("items")) {
+                JsonNode snippet = item.path("snippet");
+                String id = item.path("contentDetails").path("videoId").asText(snippet.path("resourceId").path("videoId").asText());
+                String title = snippet.path("title").asText();
+                if (!id.matches("[A-Za-z0-9_-]{11}") || title.isBlank() || title.equals("Private video")
+                    || title.equals("Deleted video") || !seenVideos.add(id)) continue;
+                String artist = snippet.path("videoOwnerChannelTitle").asText(snippet.path("channelTitle").asText("YouTube"));
+                if (artist.isBlank()) artist = "YouTube";
+                songs.add(new com.butterzhub.muzic.dto.SongDto(title, artist, id,
+                    "https://i.ytimg.com/vi/" + id + "/hqdefault.jpg"));
+            }
+            page = body.path("nextPageToken").asText("");
+            if (!page.isEmpty() && !seenPages.add(page))
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Invalid YouTube pagination");
+        } while (!page.isEmpty());
+        return List.copyOf(songs);
+    }
+
     private <T> T call(Supplier<T> operation) {
         try { return operation.get(); }
         catch (RestClientResponseException exception) {

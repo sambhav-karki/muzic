@@ -6,7 +6,7 @@ import { planNext, uniqueSongs } from './queue'
 import { useSwiped } from '../discovery/SwipedContext'
 
 interface PlayerState {
-  playbackKey: number; song: Song | null; playing: boolean; shuffle: boolean; volume: number; busy: boolean; message: string; playlistMode: boolean
+  minimized: boolean; setMinimized: (value: boolean) => void; playbackKey: number; song: Song | null; playing: boolean; shuffle: boolean; volume: number; busy: boolean; message: string; playlistMode: boolean
   play: (song: Song, queue?: Song[], playlistId?: string) => void
   next: () => Promise<void>; previous: () => void; toggle: () => void; stop: () => void
   shuffleTrack: () => Promise<void>
@@ -16,6 +16,7 @@ interface PlayerState {
 const Context = createContext<PlayerState | null>(null)
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const library = useSwiped()
+  const [minimized, setMinimized] = useState(true)
   const [playbackKey, setPlaybackKey] = useState(0)
   const [song, setSong] = useState<Song | null>(null)
   const [playing, setPlaying] = useState(false)
@@ -92,7 +93,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', keydown)
   }, [song, toggle])
   const stop = () => { cancel(); setSong(null); setPlaying(false); setPlaylistMode(false); setMessage('') }
-  return <Context.Provider value={{ playbackKey, song, playing, shuffle, volume, busy, message, playlistMode, play, next, previous, shuffleTrack, toggle, stop, setShuffle, setVolume, setPlaying, setMessage }}>{children}</Context.Provider>
+  return <Context.Provider value={{ minimized, setMinimized, playbackKey, song, playing, shuffle, volume, busy, message, playlistMode, play, next, previous, shuffleTrack, toggle, stop, setShuffle, setVolume, setPlaying, setMessage }}>{children}</Context.Provider>
 }
 // oxlint-disable-next-line react/only-export-components
 export function usePlayer() {

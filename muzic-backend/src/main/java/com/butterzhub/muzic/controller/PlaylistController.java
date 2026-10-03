@@ -45,6 +45,10 @@ public class PlaylistController {
             @Valid @RequestBody com.butterzhub.muzic.dto.CreatePlaylistRequest request, OAuth2AuthenticationToken auth) {
         return ResponseEntity.status(HttpStatus.CREATED).body(playlists.createYouTubePlaylist(auth, request));
     }
+    @GetMapping("/{playlistId}/items")
+    public List<com.butterzhub.muzic.dto.SongDto> items(@PathVariable String playlistId, OAuth2AuthenticationToken auth) {
+        return playlists.importYouTubeTracks(auth, playlistId);
+    }
     @PostMapping("/{playlistId}/items")
     public ResponseEntity<Void> add(@PathVariable String playlistId,
             @Valid @RequestBody com.butterzhub.muzic.dto.AddPlaylistItemRequest request, OAuth2AuthenticationToken auth) {

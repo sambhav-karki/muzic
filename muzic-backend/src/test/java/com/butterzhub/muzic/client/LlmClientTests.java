@@ -21,8 +21,6 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
 class LlmClientTests {
-    private static final List<String> FALLBACK = List.of("Tycho - Awake",
-            "Lofi Fruits Music - Chill Lofi Study", "Miles Davis - So What");
     private MockRestServiceServer server;
     private LlmClient client;
 
@@ -56,7 +54,7 @@ class LlmClientTests {
         for (int i = 0; i < 6; i++) {
         server.expect(anything()).andRespond(withSuccess(envelope(text), MediaType.APPLICATION_JSON));
         }
-        assertEquals(FALLBACK, client.suggestSongs("jazz"));
+        assertFallback(client.suggestSongs("jazz"));
         server.verify();
     }
 
@@ -66,7 +64,7 @@ class LlmClientTests {
         for (int i = 0; i < 6; i++) {
         server.expect(anything()).andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
         }
-        assertEquals(FALLBACK, client.suggestSongs("jazz"));
+        assertFallback(client.suggestSongs("jazz"));
         server.verify();
     }
 
@@ -75,7 +73,7 @@ class LlmClientTests {
         for (int i = 0; i < 6; i++) {
         server.expect(anything()).andRespond(withServerError());
         }
-        assertEquals(FALLBACK, client.suggestSongs("jazz"));
+        assertFallback(client.suggestSongs("jazz"));
         server.verify();
     }
 
@@ -104,7 +102,7 @@ class LlmClientTests {
         for (String model : models) {
             server.expect(requestTo(modelUrl(model))).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
         }
-        assertEquals(FALLBACK, client.suggestSongs("jazz"));
+        assertFallback(client.suggestSongs("jazz"));
         server.verify();
     }
 
@@ -138,15 +136,30 @@ class LlmClientTests {
         for (int i = 0; i < 6; i++) {
         server.expect(anything()).andRespond(withException(new java.net.SocketTimeoutException("timeout")));
         }
-        assertEquals(FALLBACK, client.suggestSongs("jazz"));
+        assertFallback(client.suggestSongs("jazz"));
         server.verify();
     }
 
     @Test
     void missingKeyUsesFallbackWithoutNetwork() {
         ReflectionTestUtils.setField(client, "apiKey", "");
-        assertEquals(FALLBACK, client.suggestSongs("jazz"));
+        assertFallback(client.suggestSongs("jazz"));
         server.verify();
+    }
+
+    private void assertFallback(List<String> songs) {
+        assertEquals(3, songs.size());
+        assertEquals(3, songs.stream().distinct().count());
+        org.junit.jupiter.api.Assertions.assertTrue(songs.stream().allMatch(s -> s.contains(" - ")));
+    }
+
+    @Test
+    void repeatedPromptsRotateTheFallbackPool() {
+        ReflectionTestUtils.setField(client, "apiKey", "");
+        var first = client.suggestSongs("metal");
+        var second = client.suggestSongs("metal");
+        assertFallback(first); assertFallback(second);
+        org.junit.jupiter.api.Assertions.assertNotEquals(first, second);
     }
 
     private String envelope(String text) throws JsonProcessingException {

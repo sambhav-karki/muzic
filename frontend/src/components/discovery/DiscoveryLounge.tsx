@@ -29,12 +29,12 @@ function PersonalLibrary({ userId }: { userId: string }) {
     }, 700)
     return () => { window.clearTimeout(timer); controller.abort() }
   }, [liked, retry])
-  return <><SwipeDeck onLike={like} /><SwipedLibrary userId={userId} /><section className="personal-feed"><div className="eyebrow">BONUS ROUND / INSPIRED BY YOUR LIKES</div><h3>Your next favorites</h3>
+  return <><SwipeDeck onLike={like} /><SwipedLibrary userId={userId} /><section className="personal-feed"><div className="eyebrow">INSPIRED BY YOUR LIKES</div><h3>Your next favorites</h3>
     {!liked.length ? <p>Your likes will shape the tracks you discover here.</p> : loading ? <p role="status">CURATING YOUR PERSONAL FEED...</p> : error ? <div role="alert"><p className="error-message">{error}</p><button className="pixel-button" onClick={() => setRetry(value => value + 1)}>RETRY FEED</button></div> : feed.length ? <div className="song-grid">{feed.map((song, index) => <SongCard key={song.youtubeVideoId} song={song} index={index} onPlay={player.play} />)}</div> : <div><p>No new matches this round. Like more songs or try again.</p><button className="pixel-button" onClick={() => setRetry(value => value + 1)}>TRY AGAIN</button></div>}
   </section></>
 }
 export default function DiscoveryLounge({ profile }: { profile: Profile | null }) {
-  return <><div className="pixel-divider" aria-hidden="true"><span>♪</span><i /><span>DISCOVERY LOADING</span><i /><span>♪</span></div><section className="discovery-lounge"><div className="eyebrow">LEVEL 02 / DISCOVERY LOUNGE</div><h2>Swipe That Song!</h2><p>New tracks. Quick decisions. Find your next obsession.</p>
+  return <><div className="pixel-divider" aria-hidden="true"><span>[]</span><i /><span>DISCOVERY LOADING</span><i /><span>[]</span></div><section className="discovery-lounge"><h2>Swipe That Song!</h2><p>New tracks. Quick decisions. Find your next obsession.</p>
     {profile?.authenticated && profile.id ? <PersonalLibrary key={profile.id} userId={profile.id} /> : <><SwipeDeck onLike={() => false} /><p className="guest-likes"><a href={GOOGLE_LOGIN_URL}>Connect Google</a> to save likes in your personal, website-only Swiped playlist.</p></>}
   </section></>
 }

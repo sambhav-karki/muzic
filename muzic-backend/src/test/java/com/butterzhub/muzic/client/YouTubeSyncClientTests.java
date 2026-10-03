@@ -51,6 +51,24 @@ class YouTubeSyncClientTests {
         client = new YouTubeSyncClient(clients, new InMemoryClientRegistrationRepository(registration), builder.build());
     }
 
+    @Test
+    void importsAllPagesAndSkipsUnavailableTracks() {
+        server.expect(queryParam("part", "snippet,contentDetails"))
+            .andExpect(queryParam("maxResults", "50"))
+            .andExpect(header("Authorization", "Bearer delegated-token"))
+            .andRespond(withSuccess("""
+                {"items":[{"contentDetails":{"videoId":"aaaaaaaaaaa"},"snippet":{"title":"First","videoOwnerChannelTitle":"Artist"}},
+                {"contentDetails":{"videoId":"bbbbbbbbbbb"},"snippet":{"title":"Private video"}}],"nextPageToken":"page2"}
+                """, MediaType.APPLICATION_JSON));
+        server.expect(queryParam("pageToken", "page2")).andRespond(withSuccess("""
+            {"items":[{"contentDetails":{"videoId":"ccccccccccc"},"snippet":{"title":"Second","videoOwnerChannelTitle":"Other"}}]}
+            """, MediaType.APPLICATION_JSON));
+        var tracks = client.fetchPlaylistItems(auth, "PLtest");
+        assertEquals(List.of("First", "Second"), tracks.stream().map(com.butterzhub.muzic.dto.SongDto::title).toList());
+        assertEquals("Artist", tracks.get(0).artist());
+        server.verify();
+    }
+
     private void grant(Set<String> scopes, Instant expires) {
         var token = new OAuth2AccessToken(OAuth2AccessToken.TokenType.BEARER, "delegated-token",
             Instant.now().minusSeconds(3600), expires, scopes);
