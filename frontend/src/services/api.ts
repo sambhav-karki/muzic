@@ -11,10 +11,18 @@ export class ApiError extends Error {
   constructor(message: string, status: number) { super(message); this.status = status }
 }
 
+const unauthorizedListeners = new Set<() => void>()
+export function onUnauthorized(listener: () => void): () => void {
+  unauthorizedListeners.add(listener)
+  return () => { unauthorizedListeners.delete(listener) }
+}
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response
   try { response = await fetch(`${API_BASE}${path}`, { ...init, credentials: 'include' }) }
   catch { throw new ApiError('Cannot reach Muzic. Please try again later.', 0) }
+  if (response.status === 401) {
+    unauthorizedListeners.forEach(listener => listener())
+  }
   if (!response.ok) {
     const problem = await response.json().catch(() => null) as { detail?: string } | null
     throw new ApiError(problem?.detail || `Request failed (${response.status}). Please try again.`, response.status)

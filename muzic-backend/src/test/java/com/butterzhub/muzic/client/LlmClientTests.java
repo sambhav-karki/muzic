@@ -36,7 +36,7 @@ class LlmClientTests {
 
     @Test
     void sendsPreferencesSeparatelyAndParsesSongSearches() throws Exception {
-        server.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=test-key"))
+        server.expect(requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=test-key"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.contents[0].parts[0].text").value("relaxing jazz"))
                 .andExpect(jsonPath("$.systemInstruction.parts[0].text").exists())
@@ -53,7 +53,7 @@ class LlmClientTests {
             "[\"A - B\",\"C - D\",\"\"]", "[\"A - B\",\"A - B\",\"C - D\"]",
             "[\"A\",\"B\",\"C\"]"})
     void invalidModelOutputFallsBack(String text) throws Exception {
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 6; i++) {
         server.expect(anything()).andRespond(withSuccess(envelope(text), MediaType.APPLICATION_JSON));
         }
         assertEquals(FALLBACK, client.suggestSongs("jazz"));
@@ -63,7 +63,7 @@ class LlmClientTests {
     @ParameterizedTest
     @ValueSource(strings = {"", "{}", "{\"candidates\":[]}", "not JSON"})
     void missingOrMalformedProviderResponseFallsBack(String response) {
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 6; i++) {
         server.expect(anything()).andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
         }
         assertEquals(FALLBACK, client.suggestSongs("jazz"));
@@ -72,7 +72,7 @@ class LlmClientTests {
 
     @Test
     void providerFailureFallsBack() {
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 6; i++) {
         server.expect(anything()).andRespond(withServerError());
         }
         assertEquals(FALLBACK, client.suggestSongs("jazz"));
@@ -82,9 +82,9 @@ class LlmClientTests {
     @ParameterizedTest
     @ValueSource(ints = {503, 429, 404})
     void capacityOrMissingModelTriesNextModel(int status) throws Exception {
-        server.expect(requestTo(modelUrl("gemini-3.1-flash-lite")))
-                .andRespond(withStatus(HttpStatus.valueOf(status)));
         server.expect(requestTo(modelUrl("gemini-3.5-flash-lite")))
+                .andRespond(withStatus(HttpStatus.valueOf(status)));
+        server.expect(requestTo(modelUrl("gemini-3.1-flash-lite")))
                 .andExpect(jsonPath("$.contents[0].parts[0].text").value("jazz"))
                 .andRespond(withSuccess(envelope("[\"A - B\",\"C - D\",\"E - F\"]"), MediaType.APPLICATION_JSON));
 
@@ -95,22 +95,12 @@ class LlmClientTests {
     @Test
     void exhaustedChainReturnsStarterSongs() {
         List<String> models = List.of(
-            "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
             "gemini-2.5-flash-lite",
             "gemini-2.5-flash",
             "gemini-3-flash",
-            "gemini-3.5-flash",
-            "gemini-3.6-flash",
-            "gemini-3.7-flash",
-            "gemini-3.8-flash",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-8b",
-            "gemma-4-31b-it",
-            "gemma-4-26b-it",
-            "gemini-1.5-pro");
+            "gemini-3.8-flash");
         for (String model : models) {
             server.expect(requestTo(modelUrl(model))).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS));
         }
@@ -120,9 +110,9 @@ class LlmClientTests {
 
     @Test
     void emptyResponseTriesNextModel() throws Exception {
-        server.expect(requestTo(modelUrl("gemini-3.1-flash-lite")))
-                .andRespond(withSuccess("", MediaType.APPLICATION_JSON));
         server.expect(requestTo(modelUrl("gemini-3.5-flash-lite")))
+                .andRespond(withSuccess("", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(modelUrl("gemini-3.1-flash-lite")))
                 .andRespond(withSuccess(envelope("[\"A - B\",\"C - D\",\"E - F\"]"), MediaType.APPLICATION_JSON));
         assertEquals(List.of("A - B", "C - D", "E - F"), client.suggestSongs("jazz"));
         server.verify();
@@ -145,7 +135,7 @@ class LlmClientTests {
 
     @Test
     void networkTimeoutFallsBack() {
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < 6; i++) {
         server.expect(anything()).andRespond(withException(new java.net.SocketTimeoutException("timeout")));
         }
         assertEquals(FALLBACK, client.suggestSongs("jazz"));

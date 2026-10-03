@@ -12,9 +12,10 @@ async function mock(page: Page, authenticated: boolean) {
   await page.route('http://localhost:8080/**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
-    const headers = { 'access-control-allow-origin': 'http://localhost:4200', 'access-control-allow-credentials': 'true', 'access-control-allow-headers': 'Content-Type', 'access-control-allow-methods': 'GET,POST,OPTIONS' }
+    const headers = { 'access-control-allow-origin': route.request().headers().origin || 'http://localhost:4200', 'access-control-allow-credentials': 'true', 'access-control-allow-headers': 'Content-Type', 'access-control-allow-methods': 'GET,POST,OPTIONS' }
     if (request.method() === 'OPTIONS') { await route.fulfill({ status: 204, headers }); return }
     let body: unknown = []
+    if (path === '/api/auth/status') body = { authenticated }
     if (path === '/api/me') body = { authenticated, id: authenticated ? 'user-a' : null, name: 'Sam', pictureUrl: null }
     if (path === '/api/playlists') body = [{ id: 'saved-1', name: 'Night Drive', songs, youtubePlaylistId: null }]
     if (path === '/api/discovery/trending') body = songs
@@ -159,3 +160,23 @@ test('Swiped preview caps at three; library searches, groups and removes selecte
   await page.reload()
   await expect(page.locator('.swiped-library .swiped-track')).toHaveCount(0)
 })
+
+for (const endpoint of ['/api/auth/status', '/api/me', '/api/playlists']) {
+  test(`401 from ${endpoint} returns to guest and allows Google reconnect`, async ({ page }) => {
+    await mock(page, true)
+    await page.route(`http://localhost:8080${endpoint}`, route => route.fulfill({
+      status: 401,
+      headers: { 'access-control-allow-origin': route.request().headers().origin || 'http://localhost:4200', 'access-control-allow-credentials': 'true' },
+      contentType: 'application/json', body: '{}',
+    }))
+    await page.route('http://localhost:8080/oauth2/authorization/google', route => route.fulfill({
+      contentType: 'text/html', body: '<p>Google login</p>',
+    }))
+    await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+    await page.goto('/')
+    await expect(page.locator('.account-banner')).toBeVisible()
+    await expect(page.locator('.saved-playlists')).toHaveCount(0)
+    await page.locator('.account-banner').click()
+    await expect(page).toHaveURL('http://localhost:8080/oauth2/authorization/google')
+  })
+}

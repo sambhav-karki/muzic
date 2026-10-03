@@ -1,7 +1,7 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import SplashIntro from './components/SplashIntro'
 import MusicDashboard from './components/search/MusicDashboard'
-import { api, GOOGLE_LOGIN_URL, GUEST_PROFILE } from './services/api'
+import { api, GOOGLE_LOGIN_URL, GUEST_PROFILE, onUnauthorized } from './services/api'
 import type { Profile } from './services/api'
 import { PlayerProvider, usePlayer } from './components/player/PlayerContext'
 import RetroPlayer from './components/player/RetroPlayer'
@@ -16,15 +16,23 @@ function Dashboard() {
   useEffect(() => { setUserId(profile?.authenticated ? profile.id : null) }, [profile, setUserId])
   useEffect(() => {
     const controller = new AbortController()
+    let authFailed = false
+    const unsubscribe = onUnauthorized(() => {
+      authFailed = true
+      setProfile(GUEST_PROFILE)
+    })
     api.authStatus(controller.signal)
       .then(status => status.authenticated ? api.profile(controller.signal) : GUEST_PROFILE)
-      .then(profile => { if (!controller.signal.aborted) setProfile(profile) }).catch((reason: unknown) => {
-      if (!controller.signal.aborted) setProfileError(reason instanceof Error ? reason.message : 'Could not check account status.')
+      .then(profile => { if (!controller.signal.aborted && !authFailed) setProfile(profile) }).catch((reason: unknown) => {
+      if (!controller.signal.aborted) {
+        setProfile(GUEST_PROFILE)
+        setProfileError(reason instanceof Error ? reason.message : 'Could not check account status.')
+      }
     })
-    return () => controller.abort()
+    return () => { controller.abort(); unsubscribe() }
   }, [])
   return <><SplashIntro /><div className="app-shell"><header className="site-header"><a className="brand" href="#home">Muzic<span>♪</span></a><span className="header-tag pixel-text">INSERT VIBE · PRESS PLAY</span><span className="status-chip">■ {profile?.authenticated ? profile.name || 'PLAYER CONNECTED' : 'SYSTEM ONLINE'}</span></header><main id="home"><section className="hero-deck"><div className="eyebrow">LEVEL 01 / YOUR PERSONAL SOUNDTRACK</div><h1>Good vibes.<br /><span>Great tracks.</span></h1><p>Tell us your mood. Discover your next favorite song.</p>
-    {profile?.authenticated === false && <a className="account-banner pixel-panel" href={GOOGLE_LOGIN_URL}><span aria-hidden="true">+</span> Connect your google account to unlock more features <span aria-hidden="true">↗</span></a>}
+    {profile?.authenticated === false && <a className="account-banner pixel-panel" href={GOOGLE_LOGIN_URL} onClick={event => { event.preventDefault(); window.location.href = GOOGLE_LOGIN_URL }}><span aria-hidden="true">+</span> Connect your google account to unlock more features <span aria-hidden="true">↗</span></a>}
     {profileError && <p className="error-message" role="status">{profileError} Refresh to check your account again.</p>}
     <MusicDashboard key={profile?.id || 'guest'} profile={profile || { authenticated: false, id: null, name: null, pictureUrl: null }} onPlay={player.play} />
     <RetroPlayer key={player.song ? 'active' : 'idle'} />

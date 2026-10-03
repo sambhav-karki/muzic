@@ -23,22 +23,12 @@ public class LlmClient {
 
     private static final Logger logger = LoggerFactory.getLogger(LlmClient.class);
     private static final List<String> MODELS = List.of(
-            "gemini-3.1-flash-lite",
             "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
             "gemini-2.5-flash-lite",
             "gemini-2.5-flash",
             "gemini-3-flash",
-            "gemini-3.5-flash",
-            "gemini-3.6-flash",
-            "gemini-3.7-flash",
-            "gemini-3.8-flash",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
-            "gemini-1.5-flash",
-            "gemini-1.5-flash-8b",
-            "gemma-4-31b-it",
-            "gemma-4-26b-it",
-            "gemini-1.5-pro");
+            "gemini-3.8-flash");
 
     private static final String SYSTEM_PROMPT = """
             Act as a music curator. Recommend exactly 3 distinct, specific songs
@@ -58,7 +48,7 @@ public class LlmClient {
     @Value("${gemini.api.key:}")
     private String apiKey;
 
-private final RestClient restClient;
+    private final RestClient restClient;
 
     public LlmClient() {
         this(defaultBuilder());
@@ -128,7 +118,7 @@ private final RestClient restClient;
                     logger.warn("Gemini model {} returned invalid JSON", model);
                 }
             }
-            logger.warn("All 16 models exhausted, reverting to starter songs");
+            logger.warn("All {} models exhausted, reverting to starter songs", MODELS.size());
             return FALLBACK_SONGS;
         } catch (Exception ex) {
             logger.warn("Gemini recommendation failed ({}); using starter songs", ex.getClass().getSimpleName());
