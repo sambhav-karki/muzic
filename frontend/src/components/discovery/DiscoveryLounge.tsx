@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from 'react'
 import type { Profile, Song } from '../../services/api'
-import { api, GOOGLE_LOGIN_URL } from '../../services/api'
+import { api, connectGoogle, GOOGLE_LOGIN_URL } from '../../services/api'
 import { usePlayer } from '../player/PlayerContext'
 import SongCard from '../search/SongCard'
 import SwipeDeck from './SwipeDeck'
@@ -35,7 +35,7 @@ function PersonalLibrary({ userId }: { userId: string }) {
 }
 export default function DiscoveryLounge({ profile }: { profile: Profile | null }) {
   return <><div className="pixel-divider" aria-hidden="true"><span>[]</span><i /><span>DISCOVERY LOADING</span><i /><span>[]</span></div><section className="discovery-lounge"><h2>Swipe That Song!</h2><p>New tracks. Quick decisions. Find your next obsession.</p>
-    {profile?.authenticated && profile.id ? <PersonalLibrary key={profile.id} userId={profile.id} /> : <><SwipeDeck onLike={() => false} /><p className="guest-likes"><a href={GOOGLE_LOGIN_URL}>Connect Google</a> to save likes in your personal, website-only Swiped playlist.</p></>}
+    {profile?.authenticated && profile.id ? <PersonalLibrary key={profile.id} userId={profile.id} /> : <><SwipeDeck onLike={() => false} /><p className="guest-likes"><a href={GOOGLE_LOGIN_URL} onClick={event => { event.preventDefault(); void connectGoogle() }}>Connect Google</a> to save likes in your personal, website-only Swiped playlist.</p></>}
   </section></>
 }
 

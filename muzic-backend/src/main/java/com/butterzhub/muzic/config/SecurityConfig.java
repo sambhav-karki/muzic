@@ -16,6 +16,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.web.DefaultOAuth2AuthorizationRequestResolver;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.HttpMethod;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -70,7 +71,9 @@ public class SecurityConfig {
         return http
             .cors(config -> config.configurationSource(source))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/status").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/auth/status", "/api/search/direct", "/api/discovery/trending").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/recommend").permitAll()
+                .requestMatchers("/api/playlists/**", "/api/youtube/**").authenticated()
                 .requestMatchers("/", "/error", "/oauth2/**", "/login/**").permitAll()
                 .anyRequest().authenticated())
             // Allow session-authenticated API writes from Postman and browser dev tools without a CSRF token.

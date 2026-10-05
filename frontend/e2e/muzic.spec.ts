@@ -22,7 +22,7 @@ for (const selector of ['.account-banner', '.guest-likes a']) {
     await page.goto('/')
     await expect(page.locator('.trading-card h3')).toHaveText('Neon Night')
     await expect(page.locator(selector)).toHaveAttribute('href', 'http://localhost:8080/oauth2/authorization/google')
-    expect(apiRequests.some(url => new URL(url).pathname === '/api/auth/status')).toBe(true)
+    expect(apiRequests.some(url => new URL(url).pathname === '/api/auth/status')).toBe(false)
     expect(apiRequests.some(url => new URL(url).pathname === '/api/discovery/trending')).toBe(true)
     expect(apiRequests.every(url => new URL(url).origin === 'http://localhost:8080')).toBe(true)
     await page.locator(selector).click()
@@ -45,6 +45,7 @@ async function mock(page: Page, authenticated: boolean) {
     if (path === '/api/playlists') body = [{ id: 'saved-1', title: 'Night Drive', description: '', thumbnailUrl: null, itemCount: 3 }]
     if (path === '/api/playlists/saved-1/items') body = songs
     if (path === '/api/discovery/trending') body = songs
+    if (path === '/api/search/direct') body = songs
     if (path === '/api/recommend') {
       const prompt = request.postDataJSON().prompt as string
       prompts.push(prompt)
@@ -64,6 +65,112 @@ async function mock(page: Page, authenticated: boolean) {
     }}; window.onYouTubeIframeAPIReady();
   ` }))
   return { prompts, writes }
+}
+
+test('sleeping backend never triggers health probes or a terminal on page load', async ({ page }) => {
+  await page.clock.install()
+  await mock(page, false)
+  let probes = 0
+  await page.route('**/api/**', route => {
+    if (new URL(route.request().url()).pathname === '/api/auth/status') probes++
+    return route.fulfill({
+      headers: { 'access-control-allow-origin': 'http://localhost:4200', 'access-control-allow-credentials': 'true' },
+      contentType: 'text/html', body: '<!doctype html>Render booting',
+    })
+  })
+  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+  await page.goto('/')
+  await expect(page.getByLabel('Enter your music vibe')).toBeEnabled()
+  await page.clock.fastForward(10000)
+  await expect(page.locator('.wake-terminal')).toHaveCount(0)
+  expect(probes).toBe(0)
+})
+
+for (const action of ['search', 'login']) {
+  test(`closing the terminal cancels ${action} and stops wake-up polling`, async ({ page }) => {
+    await page.clock.install()
+    const { prompts } = await mock(page, false)
+    let probes = 0
+    let ready = false
+    await page.route('**/api/auth/status', route => {
+      probes++
+      return route.fulfill({
+        headers: { 'access-control-allow-origin': 'http://localhost:4200', 'access-control-allow-credentials': 'true' },
+        contentType: ready ? 'application/json' : 'text/html',
+        body: ready ? '{"authenticated":false}' : '<!doctype html>Render booting',
+      })
+    })
+    await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+    await page.goto('/')
+    if (action === 'search') {
+      await page.getByLabel('Enter your music vibe').fill('cancelled jazz')
+      await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
+    } else await page.locator('.account-banner').click()
+    await expect(page.getByRole('dialog', { name: 'Backend waking up' })).toBeVisible()
+    await page.getByRole('button', { name: 'Close wake-up popup' }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    const probesAtClose = probes
+    ready = true
+    await page.clock.fastForward(10000)
+    expect(probes).toBe(probesAtClose)
+    expect(prompts).toHaveLength(0)
+    await expect(page).toHaveURL('http://localhost:4200/')
+    await expect(page.getByLabel('Enter your music vibe')).toBeEnabled()
+    // Cancellation does not poison later actions.
+    await page.getByLabel('Enter your music vibe').fill('retry jazz')
+    await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
+    await expect(page.locator('.recommendations .song-card')).toHaveCount(3)
+    expect(prompts).toEqual(['retry jazz'])
+  })
+}
+
+test('guest normal search plays tracks and save buttons prompt without navigating', async ({ page }) => {
+  const { writes } = await mock(page, false)
+  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'NORMAL SEARCH', exact: true }).click()
+  await page.getByLabel('Enter your music vibe').fill('Neon Night')
+  await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
+  await expect(page.locator('.recommendations .song-card')).toHaveCount(3)
+  await page.getByRole('button', { name: 'Like Neon Night', exact: true }).click()
+  await expect(page.locator('.toast')).toContainText('Connect your Google account to save tracks')
+  await page.getByRole('region', { name: 'Recommended songs' }).getByRole('button', { name: 'Add Neon Night to playlist', exact: true }).click()
+  await expect(page.locator('.toast')).toBeVisible()
+  await expect(page).toHaveURL('http://localhost:4200/')
+  await page.getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
+  await expect(page.locator('.player-dock')).toBeVisible()
+  expect(writes).toHaveLength(0)
+})
+
+for (const action of ['search', 'normal search', 'login']) {
+  test(`cold start terminal resumes pending ${action} after HTML boot page`, async ({ page }) => {
+    const { prompts } = await mock(page, false)
+    await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+    await page.goto('/')
+    await expect(page.locator('.trading-card h3')).toHaveText('Neon Night')
+    let ready = false
+    await page.route('**/api/auth/status', route => route.fulfill({
+      headers: { 'access-control-allow-origin': 'http://localhost:4200', 'access-control-allow-credentials': 'true' },
+      contentType: ready ? 'application/json' : 'text/html',
+      body: ready ? '{"authenticated":false}' : '<!doctype html><p>Render waking</p>',
+    }))
+    await page.route('**/oauth2/authorization/google', route => route.fulfill({ contentType: 'text/html', body: '<p>Google login</p>' }))
+    if (action !== 'login') {
+      if (action === 'normal search') await page.getByRole('button', { name: 'NORMAL SEARCH', exact: true }).click()
+      await page.getByLabel('Enter your music vibe').fill('sleepy jazz')
+      await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
+    } else await page.locator('.account-banner').click()
+    await expect(page.getByRole('dialog', { name: 'Backend waking up' })).toBeVisible()
+    await expect(page.getByText('> SYSTEM STATUS: WAKING CONTAINER...')).toBeVisible()
+    await expect(page).toHaveURL('http://localhost:4200/')
+    expect(prompts).toHaveLength(0)
+    await page.screenshot({ path: `test-results/wake-terminal-${action}.png` })
+    ready = true
+    if (action !== 'login') {
+      await expect(page.locator('.recommendations .song-card')).toHaveCount(3, { timeout: 10000 })
+      expect(prompts).toEqual(action === 'search' ? ['sleepy jazz'] : [])
+    } else await expect(page).toHaveURL('http://localhost:8080/oauth2/authorization/google', { timeout: 10000 })
+  })
 }
 
 test('guest search, cached intro and standalone continuation', async ({ page }) => {
@@ -200,7 +307,7 @@ test('Swiped preview caps at three; library searches, groups and removes selecte
   await expect(page.locator('.swiped-library .swiped-track')).toHaveCount(0)
 })
 
-for (const endpoint of ['/api/auth/status', '/api/me', '/api/playlists']) {
+for (const endpoint of ['/api/me', '/api/playlists']) {
   test(`401 from ${endpoint} returns to guest and allows Google reconnect`, async ({ page }) => {
     await mock(page, true)
     await page.route(`**${endpoint}`, route => route.fulfill({
@@ -224,7 +331,7 @@ test('theme persists, space toggles playback and player fits small viewports', a
   await mock(page, true)
   await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
   await page.goto('/')
-  await page.getByRole('button', { name: 'Toggle light theme' }).click()
+  await page.getByRole('button', { name: 'Switch to light theme' }).click()
   await expect(page.locator('body')).toHaveClass(/theme-light/)
   await page.reload()
   await expect(page.locator('body')).toHaveClass(/theme-light/)

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { api, ApiError } from '../../services/api'
+import { useEffect, useRef, useState } from 'react'
+import { api, backendReadiness } from '../../services/api'
 import type { Profile, Song } from '../../services/api'
 import ImportedPlaylists from '../ImportedPlaylists'
 import RetroSearchBar from './RetroSearchBar'
@@ -12,11 +12,24 @@ export default function MusicDashboard({ profile, onPlay }: Props) {
   const [songs, setSongs] = useState<Song[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const pending = useRef<AbortController | null>(null)
+  useEffect(() => () => pending.current?.abort(), [])
   async function search(prompt: string) {
+    pending.current?.abort()
+    const controller = new AbortController()
+    pending.current = controller
     setLoading(true); setError(''); setSearched(true)
-    try { setSongs((await (mode === 'ai' ? api.recommend(prompt) : api.directSearch(prompt))).slice(0, 3)) }
-    catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Could not curate tracks. Please try again.') }
-    finally { setLoading(false) }
+    try {
+      await backendReadiness.ensureReady(controller.signal)
+      const tracks = await (mode === 'ai' ? api.recommend(prompt, controller.signal) : api.directSearch(prompt, controller.signal))
+      if (!controller.signal.aborted) setSongs(tracks.slice(0, 3))
+    } catch (reason) {
+      if (!controller.signal.aborted && !(reason instanceof Error && reason.name === 'AbortError')) {
+        setError(reason instanceof Error ? reason.message : 'Could not curate tracks. Please try again.')
+      }
+    } finally {
+      if (pending.current === controller) { pending.current = null; setLoading(false) }
+    }
   }
   return <>
     <RetroSearchBar loading={loading} onSearch={search} mode={mode} />

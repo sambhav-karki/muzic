@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import PlaylistDialog from '../PlaylistDialog'
 import { useSwiped } from '../discovery/SwipedContext'
-import { GOOGLE_LOGIN_URL } from '../../services/api'
+import { promptToSave } from '../../services/api'
 import type { Song } from '../../services/api'
 
 export default function SongCard({ song, index = 0, onPlay }: { song: Song; index?: number; onPlay: (song: Song) => void }) {
   const library = useSwiped()
   const [adding, setAdding] = useState(false)
   const liked = library.songs.some(track => track.youtubeVideoId === song.youtubeVideoId)
-  const connect = () => { window.location.href = GOOGLE_LOGIN_URL }
+  const connect = promptToSave
   return <article className="track-card pixel-panel">
     {adding && <PlaylistDialog videoId={song.youtubeVideoId} onClose={() => setAdding(false)} />}
     <button className="song-card" onClick={() => onPlay(song)} aria-label={`Play ${song.title} by ${song.artist}`}>

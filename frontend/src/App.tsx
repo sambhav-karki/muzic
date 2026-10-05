@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import SplashIntro from './components/SplashIntro'
 import MusicDashboard from './components/search/MusicDashboard'
-import { api, GOOGLE_LOGIN_URL, GUEST_PROFILE, onUnauthorized } from './services/api'
+import { api, connectGoogle, GOOGLE_LOGIN_URL, GUEST_PROFILE, onUnauthorized } from './services/api'
+import BackendWakeOverlay from './components/BackendWakeOverlay'
 import type { Profile } from './services/api'
 import { PlayerProvider, usePlayer } from './components/player/PlayerContext'
 import RetroPlayer from './components/player/RetroPlayer'
@@ -23,8 +24,7 @@ function Dashboard() {
     window.addEventListener('muzic-toast', notify)
     return () => { window.removeEventListener('muzic-toast', notify); window.clearTimeout(timer) }
   }, [])
-  const [profile, setProfile] = useState<Profile | null>(null)
-  const [profileError, setProfileError] = useState('')
+  const [profile, setProfile] = useState<Profile>(GUEST_PROFILE)
   const player = usePlayer()
   const { setUserId } = useSwiped()
   useEffect(() => { setUserId(profile?.authenticated ? profile.id : null) }, [profile, setUserId])
@@ -35,25 +35,20 @@ function Dashboard() {
       authFailed = true
       setProfile(GUEST_PROFILE)
     })
-    api.authStatus(controller.signal)
-      .then(status => status.authenticated ? api.profile(controller.signal) : GUEST_PROFILE)
-      .then(profile => { if (!controller.signal.aborted && !authFailed) setProfile(profile) }).catch((reason: unknown) => {
-      if (!controller.signal.aborted) {
-        setProfile(GUEST_PROFILE)
-        setProfileError(reason instanceof Error ? reason.message : 'Could not check account status.')
-      }
-    })
+    // Restore a session quietly; no health probe, wake loop, or landing-page error.
+    api.profile(controller.signal)
+      .then(profile => { if (!controller.signal.aborted && !authFailed) setProfile(profile) })
+      .catch(() => { if (!controller.signal.aborted) setProfile(GUEST_PROFILE) })
     return () => { controller.abort(); unsubscribe() }
   }, [])
   return <><SplashIntro />{toast && <div className="toast pixel-panel" role="status">{toast}</div>}<div className="app-shell"><header className="site-header"><button className="pixel-button secondary theme-toggle" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={theme === 'light'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{theme === 'dark' ? <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></> : <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />}</svg></button><a className="brand" href="#home">Muzic<span>[]</span></a>{profile?.authenticated ? <ProfileMenu profile={profile} /> : <span className="status-chip">SYSTEM ONLINE</span>}</header><main id="home"><section className="hero-deck"><h1 className="muze-headline" data-text="Your personal Muze">Your personal Muze</h1><p>Tell us your mood. Discover your next favorite song.</p>
-    {profile?.authenticated === false && <a className="account-banner pixel-panel" href={GOOGLE_LOGIN_URL} onClick={event => { event.preventDefault(); window.location.href = GOOGLE_LOGIN_URL }}><span aria-hidden="true">+</span> Connect your google account to unlock more features <span aria-hidden="true">&gt;</span></a>}
-    {profileError && <p className="error-message" role="status">{profileError} Refresh to check your account again.</p>}
+    {profile?.authenticated === false && <a className="account-banner pixel-panel" href={GOOGLE_LOGIN_URL} onClick={event => { event.preventDefault(); void connectGoogle() }}><span aria-hidden="true">+</span> Connect your google account to unlock more features <span aria-hidden="true">&gt;</span></a>}
     <MusicDashboard key={profile?.id || 'guest'} profile={profile || { authenticated: false, id: null, name: null, pictureUrl: null }} onPlay={player.play} />
     <RetroPlayer />
   </section><DiscoveryLounge profile={profile} /></main><footer className="site-footer pixel-text">MUZIC BY SAM <span>BUILT FOR THE LOVE OF MUSIC</span></footer></div></>
 }
 
-export default function App() { return <SwipedProvider><PlayerProvider><Dashboard /></PlayerProvider></SwipedProvider> }
+export default function App() { return <SwipedProvider><PlayerProvider><Dashboard /><BackendWakeOverlay /></PlayerProvider></SwipedProvider> }
 
 
 

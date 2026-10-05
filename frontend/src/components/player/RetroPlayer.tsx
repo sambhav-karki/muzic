@@ -3,7 +3,7 @@ import { usePlayer } from './PlayerContext'
 import { useState } from 'react'
 import { useSwiped } from '../discovery/SwipedContext'
 import PlaylistDialog from '../PlaylistDialog'
-import { GOOGLE_LOGIN_URL } from '../../services/api'
+import { promptToSave } from '../../services/api'
 import PixelDialog from '../PixelDialog'
 import './RetroPlayer.css'
 
@@ -111,7 +111,7 @@ export default function RetroPlayer() {
       <div className={`pixel-cassette ${player.playing ? 'spinning' : ''}`} aria-hidden="true"><span className="cassette-reel" /><div>MUZIC<br />SIDE A / HIGH FIDELITY</div><span className="cassette-reel" /></div>
       <label className="player-progress">TRACK POSITION<input aria-label="Track position" type="range" min="0" max={progress.duration || 0} step="1" value={Math.min(progress.time, progress.duration)} disabled={!progress.duration} onChange={event => { const time = Number(event.target.value); instance.current?.seekTo(time, true); setProgress(value => ({ ...value, time })) }} /><span>{clock(progress.time)} / {clock(progress.duration)}</span></label>
       {controls}
-      <div className="player-actions"><button className="pixel-button player-like" disabled={liked} aria-pressed={liked} onClick={() => { if (player.song && !library.like(player.song)) player.setMessage('Connect Google to save tracks in Swiped.') }}>{liked ? 'IN SWIPED' : '+ ADD TO SWIPED'}</button><button className="pixel-button secondary" onClick={() => { if (library.userId) setAdding(true); else window.location.href = GOOGLE_LOGIN_URL }}>+ ADD TO PLAYLIST</button></div>
+      <div className="player-actions"><button className="pixel-button player-like" disabled={liked} aria-pressed={liked} onClick={() => { if (player.song && !library.like(player.song)) player.setMessage('Connect Google to save tracks in Swiped.') }}>{liked ? 'IN SWIPED' : '+ ADD TO SWIPED'}</button><button className="pixel-button secondary" onClick={() => { if (library.userId) setAdding(true); else promptToSave() }}>+ ADD TO PLAYLIST</button></div>
       <label className="player-volume">VOLUME <input type="range" min="0" max="100" value={player.volume} onChange={event => player.setVolume(Number(event.target.value))} /><span>{player.volume}%</span></label>
       {player.message && <p className="player-message" role="status">{player.message}</p>}
       {library.error && <p className="player-message" role="status">{library.error}</p>}
