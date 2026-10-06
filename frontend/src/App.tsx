@@ -9,6 +9,8 @@ import RetroPlayer from './components/player/RetroPlayer'
 import DiscoveryLounge from './components/discovery/DiscoveryLounge'
 import { SwipedProvider, useSwiped } from './components/discovery/SwipedContext'
 import ProfileMenu from './components/ProfileMenu'
+import PrivacyPolicy from './pages/PrivacyPolicy'
+import TermsOfService from './pages/TermsOfService'
 import './App.css'
 function Dashboard() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => { try { return localStorage.getItem('muzic-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' } })
@@ -45,10 +47,16 @@ function Dashboard() {
     {profile?.authenticated === false && <a className="account-banner pixel-panel" href={GOOGLE_LOGIN_URL} onClick={event => { event.preventDefault(); void connectGoogle() }}><span aria-hidden="true">+</span> Connect your google account to unlock more features <span aria-hidden="true">&gt;</span></a>}
     <MusicDashboard key={profile?.id || 'guest'} profile={profile || { authenticated: false, id: null, name: null, pictureUrl: null }} onPlay={player.play} />
     <RetroPlayer />
-  </section><DiscoveryLounge profile={profile} /></main><footer className="site-footer pixel-text">MUZIC BY SAM <span>BUILT FOR THE LOVE OF MUSIC</span></footer></div></>
+  </section><DiscoveryLounge profile={profile} /></main><footer className="site-footer pixel-text"><span>MUZIC BY SAM</span><span>BUILT FOR THE LOVE OF MUSIC</span><nav className="legal-links" aria-label="Legal"><a href="/terms">[ Terms of Service ]</a><a href="/privacy">[ Privacy Policy ]</a></nav></footer></div></>
 }
 
-export default function App() { return <SwipedProvider><PlayerProvider><Dashboard /><BackendWakeOverlay /></PlayerProvider></SwipedProvider> }
+export default function App() {
+  // Legal documents stay public and never mount backend-dependent player/session views.
+  const path = window.location.pathname.replace(/\/+$/, '') || '/'
+  if (path === '/privacy') return <PrivacyPolicy />
+  if (path === '/terms') return <TermsOfService />
+  return <SwipedProvider><PlayerProvider><Dashboard /><BackendWakeOverlay /></PlayerProvider></SwipedProvider>
+}
 
 
 
