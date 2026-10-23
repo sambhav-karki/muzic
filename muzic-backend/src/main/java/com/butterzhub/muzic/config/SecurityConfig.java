@@ -71,7 +71,7 @@ public class SecurityConfig {
         return http
             .cors(config -> config.configurationSource(source))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers(HttpMethod.GET, "/api/auth/status", "/api/search/direct", "/api/discovery/trending").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/auth/status", "/api/search", "/api/search/", "/api/curation/next-similar", "/api/search/direct", "/api/discovery/trending").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/recommend").permitAll()
                 .requestMatchers("/api/playlists/**", "/api/youtube/**").authenticated()
                 .requestMatchers("/", "/error", "/oauth2/**", "/login/**").permitAll()

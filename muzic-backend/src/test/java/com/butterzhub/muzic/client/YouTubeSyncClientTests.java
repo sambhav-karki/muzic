@@ -76,6 +76,32 @@ class YouTubeSyncClientTests {
             .thenReturn(new OAuth2AuthorizedClient(registration, "google-sub", token));
     }
 
+    @Test void likedMusicFallsBackFromMissingLMAndRejectsRestrictedOrNonMusicLikes() {
+        server.expect(queryParam("playlistId", "LM")).andExpect(queryParam("maxResults", "20"))
+            .andExpect(header("Authorization", "Bearer delegated-token"))
+            .andRespond(withStatus(HttpStatus.NOT_FOUND));
+        server.expect(queryParam("playlistId", "LL")).andRespond(withSuccess("""
+            {"items":[{"contentDetails":{"videoId":"aaaaaaaaaaa"}},
+              {"contentDetails":{"videoId":"bbbbbbbbbbb"}},{"contentDetails":{"videoId":"ccccccccccc"}}]}
+            """, MediaType.APPLICATION_JSON));
+        server.expect(queryParam("part", "snippet,status")).andRespond(withSuccess("""
+            {"items":[
+              {"id":"aaaaaaaaaaa","snippet":{"title":"Music","channelTitle":"Artist","categoryId":"10"},"status":{"embeddable":true,"privacyStatus":"public"}},
+              {"id":"bbbbbbbbbbb","snippet":{"title":"Blocked","channelTitle":"Artist","categoryId":"10"},"status":{"embeddable":false,"privacyStatus":"public"}},
+              {"id":"ccccccccccc","snippet":{"title":"Other","channelTitle":"Channel","categoryId":"20"},"status":{"embeddable":true,"privacyStatus":"public"}}]}
+            """, MediaType.APPLICATION_JSON));
+        var liked = client.fetchLikedMusic(auth);
+        assertEquals(List.of("aaaaaaaaaaa"), liked.stream().map(com.butterzhub.muzic.dto.SongDto::youtubeVideoId).toList());
+        server.verify();
+    }
+    @Test void emptyMusicLikesTryLLAndEmptyAccountReturnsNoFakeTracks() {
+        for (String playlistId : List.of("LM", "LL")) {
+            server.expect(queryParam("playlistId", playlistId)).andRespond(withSuccess("{\"items\":[]}", MediaType.APPLICATION_JSON));
+        }
+        assertEquals(List.of(), client.fetchLikedMusic(auth));
+        server.verify();
+    }
+
     @Test
     void createsPrivatePlaylistAndInsertsVideoWithDelegatedToken() {
         server.expect(requestTo("https://www.googleapis.com/youtube/v3/playlists?part=snippet,status"))

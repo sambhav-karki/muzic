@@ -120,12 +120,53 @@ public class YouTubeClient {
         }
     }
 
+    public record SearchPage(List<SongDto> tracks, String nextPageToken, int page, int totalPages) {}
+
+    public SearchPage searchPage(String query, int page, int size, String pageToken) {
+        if (query == null || query.isBlank() || query.length() > 500 || page < 0 || page > 100 || size < 1 || size > 9)
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Invalid search query or page.");
+        if (useWebSearch()) {
+            List<SongDto> all = searchWebResults(query);
+            int start = Math.min(page * size, all.size());
+            return new SearchPage(all.subList(start, Math.min(start + size, all.size())), null, page, Math.max(1, (all.size() + size - 1) / size));
+        }
+        if (page > 0 && (pageToken == null || pageToken.isBlank())) {
+            SearchPage previous = searchPage(query, page - 1, size, null);
+            if (previous.nextPageToken() == null || previous.nextPageToken().isBlank())
+                return new SearchPage(List.of(), "", page, previous.totalPages());
+            return searchPage(query, page, size, previous.nextPageToken());
+        }
+        try {
+            Map<String, Object> response = restClient.get().uri(builder -> builder.path("/search")
+                .queryParam("part", "snippet").queryParam("type", "video").queryParam("videoCategoryId", "10")
+                .queryParam("videoEmbeddable", "true").queryParam("videoSyndicated", "true")
+                .queryParam("maxResults", size).queryParam("q", query.trim()).queryParam("key", apiKey)
+                .queryParam("pageToken", pageToken == null ? "" : pageToken).build())
+                .retrieve().body(new ParameterizedTypeReference<Map<String, Object>>() {});
+            if (response == null || !(response.get("items") instanceof List<?> items)) throw new IllegalArgumentException();
+            var tracks = new java.util.ArrayList<SongDto>();
+            for (Object value : items) {
+                Map<?, ?> item = asMap(value), snippet = asMap(item.get("snippet"));
+                String id = text(asMap(item.get("id")).get("videoId"));
+                String title = text(snippet.get("title")), artist = text(snippet.get("channelTitle"));
+                if (id.matches("[A-Za-z0-9_-]{11}") && !title.isBlank() && !artist.isBlank())
+                    tracks.add(new SongDto(title, artist, id, "https://i.ytimg.com/vi/" + id + "/hqdefault.jpg"));
+            }
+            Object total = asMap(response.get("pageInfo")).get("totalResults");
+            int pages = total instanceof Number number ? Math.max(1, (number.intValue() + size - 1) / size) : page + 1;
+            return new SearchPage(tracks, text(response.get("nextPageToken")), page, Math.min(101, pages));
+        } catch (RestClientException | IllegalArgumentException failure) {
+            if (failure instanceof RestClientException exception) rememberQuotaFailure(exception);
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_GATEWAY, "Music search is unavailable. Please retry.");
+        }
+    }
+
     public SongDto searchSong(String query) {
         if (query == null || query.isBlank() || query.length() > 500) return null;
         String key = cacheKey(query);
         SongDto cached = songCache.get(key);
         if (cached != null) return cached;
-        for (String variant : List.of(query.trim(), query.trim() + " official audio", query.replace(" - ", " ") + " music")) {
+        for (String variant : List.of(query.trim() + " Audio", query.trim() + " Lyric Video", query.trim())) {
             SongDto song = useWebSearch() ? null : searchSongOnce(variant);
             if (song == null) song = searchViaWebScrape(variant);
             if (song != null) { songCache.put(key, song); return song; }
@@ -222,7 +263,7 @@ public class YouTubeClient {
         var songs = new java.util.ArrayList<SongDto>();
         var seen = new java.util.HashSet<String>();
         var matcher = java.util.regex.Pattern.compile("\"videoRenderer\"\\s*:\\s*\\{").matcher(html);
-        while (matcher.find() && songs.size() < 3) {
+        while (matcher.find() && songs.size() < 90) {
             int start = matcher.end() - 1;
             int depth = 0; boolean quoted = false, escaped = false;
             for (int end = start; end < html.length(); end++) {

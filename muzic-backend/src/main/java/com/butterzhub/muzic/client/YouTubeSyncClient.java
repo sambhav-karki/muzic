@@ -219,6 +219,50 @@ public class YouTubeSyncClient {
         return List.copyOf(songs);
     }
 
+    public List<com.butterzhub.muzic.dto.SongDto> fetchLikedMusic(OAuth2AuthenticationToken auth) {
+        String bearer = token(auth);
+        JsonNode items = null;
+        for (String playlistId : List.of("LM", "LL")) {
+            try {
+                items = rest.get().uri(uri -> uri.path("/playlistItems").queryParam("part", "snippet,contentDetails")
+                    .queryParam("playlistId", playlistId).queryParam("maxResults", 20).build())
+                    .headers(h -> h.setBearerAuth(bearer)).retrieve().body(JsonNode.class);
+                if (items == null || !items.path("items").isArray())
+                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Invalid liked music response");
+                if (!items.path("items").isEmpty()) break;
+            } catch (RestClientResponseException failure) {
+                // Special music playlists are not exposed for every account.
+                if (failure.getStatusCode().value() == 404) continue;
+                throw new ResponseStatusException(failure.getStatusCode().value() == 401 ? HttpStatus.UNAUTHORIZED : HttpStatus.BAD_GATEWAY,
+                    "YouTube liked music is unavailable");
+            } catch (RestClientException failure) {
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "YouTube liked music is unavailable");
+            }
+        }
+        if (items == null) return List.of();
+        var ids = new java.util.LinkedHashSet<String>();
+        for (JsonNode item : items.path("items")) {
+            String id = item.path("contentDetails").path("videoId").asText(item.path("snippet").path("resourceId").path("videoId").asText());
+            if (id.matches("[A-Za-z0-9_-]{11}")) ids.add(id);
+        }
+        if (ids.isEmpty()) return List.of();
+        // Liked Videos can contain non-music and stale/private items. Verify live metadata.
+        JsonNode verified = call(() -> rest.get().uri(uri -> uri.path("/videos")
+            .queryParam("part", "snippet,status").queryParam("id", String.join(",", ids)).build())
+            .headers(h -> h.setBearerAuth(bearer)).retrieve().body(JsonNode.class));
+        if (verified == null || !verified.path("items").isArray())
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Invalid liked video metadata");
+        var byId = new java.util.LinkedHashMap<String, com.butterzhub.muzic.dto.SongDto>();
+        for (JsonNode item : verified.path("items")) {
+            JsonNode snippet = item.path("snippet"), status = item.path("status");
+            String id = item.path("id").asText(), title = snippet.path("title").asText(), artist = snippet.path("channelTitle").asText();
+            if (!ids.contains(id) || !"10".equals(snippet.path("categoryId").asText()) || !status.path("embeddable").asBoolean()
+                || !"public".equals(status.path("privacyStatus").asText()) || title.isBlank() || artist.isBlank()) continue;
+            byId.put(id, new com.butterzhub.muzic.dto.SongDto(title, artist, id, "https://i.ytimg.com/vi/" + id + "/hqdefault.jpg"));
+        }
+        return ids.stream().map(byId::get).filter(java.util.Objects::nonNull).toList();
+    }
+
     private <T> T call(Supplier<T> operation) {
         try { return operation.get(); }
         catch (RestClientResponseException exception) {

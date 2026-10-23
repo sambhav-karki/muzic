@@ -28,7 +28,7 @@ class YouTubeWebSearchTests {
         ReflectionTestUtils.setField(client, "apiKey", "");
     }
     @Test void noKeyResolvesEscapedMetadataAndCachesNormalizedQueries() {
-        server.expect(requestTo("https://www.youtube.com/results?search_query=Metallica%20-%20Enter%20Sandman"))
+        server.expect(requestTo("https://www.youtube.com/results?search_query=Metallica%20-%20Enter%20Sandman%20Audio"))
             .andExpect(header("User-Agent", org.hamcrest.Matchers.startsWith("Mozilla/5.0")))
             .andRespond(withSuccess(HTML, MediaType.TEXT_HTML));
         var first = client.searchSong("Metallica - Enter Sandman");
@@ -42,9 +42,9 @@ class YouTubeWebSearchTests {
     }
     @Test void quotaFailureFallsBackAndSubsequentQueriesSkipOfficialSearch() {
         ReflectionTestUtils.setField(client, "apiKey", "test-key");
-        server.expect(queryParam("q", "metal"))
+        server.expect(queryParam("q", "metal%20Audio"))
             .andRespond(withStatus(HttpStatus.FORBIDDEN).body("{\"error\":{\"errors\":[{\"reason\":\"quotaExceeded\"}]}}"));
-        server.expect(requestTo("https://www.youtube.com/results?search_query=metal"))
+        server.expect(requestTo("https://www.youtube.com/results?search_query=metal%20Audio"))
             .andRespond(withSuccess(HTML, MediaType.TEXT_HTML));
         server.expect(requestTo("https://www.youtube.com/results?search_query=jazz"))
             .andRespond(withSuccess(HTML, MediaType.TEXT_HTML));

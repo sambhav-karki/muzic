@@ -30,7 +30,7 @@ class YouTubeClientTests {
 
     @Test
     void mapsNestedMetadataAndEncodesQuery() {
-        server.expect(queryParam("q", "Miles%20Davis%20-%20So%20What"))
+        server.expect(queryParam("q", "Miles%20Davis%20-%20So%20What%20Audio"))
                 .andExpect(queryParam("part", "snippet"))
                 .andExpect(queryParam("maxResults", "5"))
                 .andExpect(queryParam("type", "video"))
@@ -85,8 +85,8 @@ class YouTubeClientTests {
     @Test
     void retriesAnEmptyLookupWithOfficialAudioQuery() {
         server.expect(anything()).andRespond(withSuccess("{\"items\":[]}", MediaType.APPLICATION_JSON));
-        server.expect(requestTo("https://www.youtube.com/results?search_query=jazz")).andRespond(withSuccess("<html></html>", MediaType.TEXT_HTML));
-        server.expect(queryParam("q", "jazz%20official%20audio")).andRespond(withSuccess(
+        server.expect(requestTo("https://www.youtube.com/results?search_query=jazz%20Audio")).andRespond(withSuccess("<html></html>", MediaType.TEXT_HTML));
+        server.expect(queryParam("q", "jazz%20Lyric%20Video")).andRespond(withSuccess(
             "{\"items\":[{\"id\":{\"videoId\":\"abcDEFG_123\"}}]}", MediaType.APPLICATION_JSON));
         expectVideo("https://i.ytimg.com/vi/abcDEFG_123/hqdefault.jpg");
         assertEquals("abcDEFG_123", client.searchSong("jazz").youtubeVideoId());

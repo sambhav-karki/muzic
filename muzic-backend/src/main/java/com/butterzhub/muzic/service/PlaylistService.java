@@ -107,6 +107,10 @@ public class PlaylistService {
         user(auth);
         return youtube.fetchPlaylistItems(auth, playlistId);
     }
+    public List<SongDto> likedMusic(OAuth2AuthenticationToken auth) {
+        user(auth);
+        return youtube.fetchLikedMusic(auth);
+    }
     public List<PlaylistDto> importYouTubePlaylists(OAuth2AuthenticationToken auth) {
         User user = user(auth);
         List<PlaylistDto> remote = youtube.fetchUserPlaylists(auth);
