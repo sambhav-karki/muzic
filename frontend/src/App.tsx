@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
 import SplashIntro from './components/SplashIntro'
 import MusicDashboard from './components/search/MusicDashboard'
-import { api, connectGoogle, GOOGLE_LOGIN_URL, GUEST_PROFILE, onUnauthorized } from './services/api'
+import { api, API_BASE, GUEST_PROFILE, onUnauthorized } from './services/api'
 import BackendWakeOverlay from './components/BackendWakeOverlay'
 import type { Profile } from './services/api'
 import { PlayerProvider, usePlayer } from './components/player/PlayerContext'
 import RetroPlayer from './components/player/RetroPlayer'
-import DiscoveryLounge from './components/discovery/DiscoveryLounge'
+import PersonalDashboard from './components/PersonalDashboard'
 import { SwipedProvider, useSwiped } from './components/discovery/SwipedContext'
 import ProfileMenu from './components/ProfileMenu'
 import PrivacyPolicy from './pages/PrivacyPolicy'
 import TermsOfService from './pages/TermsOfService'
 import './App.css'
+import './stages.css'
 function Dashboard() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => { try { return localStorage.getItem('muzic-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' } })
   useEffect(() => { document.body.classList.toggle('theme-light', theme === 'light'); document.body.classList.toggle('theme-dark', theme === 'dark'); try { localStorage.setItem('muzic-theme', theme) } catch { /* Theme works without storage. */ } }, [theme])
@@ -43,11 +44,28 @@ function Dashboard() {
       .catch(() => { if (!controller.signal.aborted) setProfile(GUEST_PROFILE) })
     return () => { controller.abort(); unsubscribe() }
   }, [])
-  return <><SplashIntro />{toast && <div className="toast pixel-panel" role="status">{toast}</div>}<div className="app-shell"><header className="site-header"><button className="pixel-button secondary theme-toggle" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={theme === 'light'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{theme === 'dark' ? <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></> : <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />}</svg></button><a className="brand" href="#home">Muzic<span>[]</span></a>{profile?.authenticated ? <ProfileMenu profile={profile} /> : <span className="status-chip">SYSTEM ONLINE</span>}</header><main id="home"><section className="hero-deck"><h1 className="muze-headline" data-text="Your personal Muze">Your personal Muze</h1><p>Tell us your mood. Discover your next favorite song.</p>
-    {profile?.authenticated === false && <a className="account-banner pixel-panel" href={GOOGLE_LOGIN_URL} onClick={event => { event.preventDefault(); void connectGoogle() }}><span aria-hidden="true">+</span> Connect your google account to unlock more features <span aria-hidden="true">&gt;</span></a>}
-    <MusicDashboard key={profile?.id || 'guest'} profile={profile || { authenticated: false, id: null, name: null, pictureUrl: null }} onPlay={player.play} />
-    <RetroPlayer />
-  </section><DiscoveryLounge profile={profile} /></main><footer className="site-footer pixel-text"><span>MUZIC BY SAM</span><span>BUILT FOR THE LOVE OF MUSIC</span><nav className="legal-links" aria-label="Legal"><a href="/terms">[ Terms of Service ]</a><a href="/privacy">[ Privacy Policy ]</a></nav></footer></div></>
+  const [searchOpen, setSearchOpen] = useState(false)
+  useEffect(() => {
+    document.body.classList.toggle('guest-hub', !profile.authenticated)
+    return () => document.body.classList.remove('guest-hub')
+  }, [profile.authenticated])
+  return <><SplashIntro />{toast && <div className="toast pixel-panel" role="status">{toast}</div>}
+    <div className={'app-shell ' + (profile.authenticated ? 'authenticated-shell' : 'guest-shell')}>
+      <header className="site-header">
+        {profile.authenticated ? <ProfileMenu profile={profile} /> : <span className="status-chip">SYSTEM ONLINE</span>}
+        <a className="brand" href="#home">Muzic<span>[]</span></a>
+        <div className="header-controls">
+          {profile.authenticated && <button className="pixel-button secondary" aria-label="Search music" aria-expanded={searchOpen} onClick={() => setSearchOpen(value => !value)}><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 3h9v9H3zM12 12l6 6" /></svg></button>}
+          <button className="pixel-button secondary theme-toggle" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={theme === 'light'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? 'LIGHT' : 'DARK'}</button>
+          {profile.authenticated && <form method="post" action={API_BASE + '/logout'}><button className="pixel-button secondary">LOG OUT</button></form>}
+        </div>
+      </header>
+      <main id="home">
+        {profile.authenticated ? <><div className={'dashboard-search ' + (searchOpen ? 'expanded' : '')} inert={!searchOpen}>{searchOpen && <MusicDashboard profile={profile} onPlay={player.play} />}</div><PersonalDashboard /></> : <section className="hero-deck"><h1 className="muze-headline" data-text="Muze away">Muze away</h1><p>Tell us your mood. Discover your next favorite song.</p><MusicDashboard profile={profile} onPlay={player.play} /></section>}
+      </main>
+      <footer className="site-footer pixel-text"><span>MUZIC BY SAM</span><span>BUILT FOR THE LOVE OF MUSIC</span><nav className="legal-links" aria-label="Legal"><a href="/terms">[ Terms of Service ]</a><a href="/privacy">[ Privacy Policy ]</a></nav></footer>
+    </div><RetroPlayer />
+  </>
 }
 
 export default function App() {

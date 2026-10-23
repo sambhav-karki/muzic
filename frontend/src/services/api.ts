@@ -55,6 +55,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  search: (q: string, page: number, token?: string, signal?: AbortSignal) => request<{ tracks: Song[]; nextPageToken: string | null; totalPages: number }>(`/api/search?q=${encodeURIComponent(q)}&mode=NORMAL&page=${page}&size=9${token ? '&pageToken=' + encodeURIComponent(token) : ''}`, { signal }),
+  feed: (signal?: AbortSignal) => request<{ quickPicks: Song[]; trending: Song[]; userPlaylists: YouTubePlaylist[]; playlistError?: string; musicError?: string }>('/api/user/feed', { signal }),
+  nextSimilar: (song: Song, exclude: string[], signal?: AbortSignal) => request<Song>(`/api/curation/next-similar?videoId=${encodeURIComponent(song.youtubeVideoId)}&title=${encodeURIComponent(song.artist + ' - ' + song.title)}&exclude=${encodeURIComponent(exclude.slice(-150).join(','))}`, { signal }),
   directSearch: (query: string, signal?: AbortSignal) => request<Song[]>('/api/search/direct?query=' + encodeURIComponent(query), { signal }),
   authStatus: (signal?: AbortSignal) => request<{ authenticated: boolean }>('/api/auth/status', { signal }),
   trending: (signal?: AbortSignal) => request<Song[]>('/api/discovery/trending', { signal }),

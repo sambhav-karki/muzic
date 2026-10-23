@@ -6,31 +6,6 @@ const songs = ['Neon Night', 'Pixel Sunrise', 'Arcade Moon'].map((title, index) 
 }))
 const continuation = { ...songs[0], title: 'Next Vibe', youtubeVideoId: '44444444444' }
 
-for (const selector of ['.account-banner', '.guest-likes a']) {
-  test(`${selector} navigates to Google OAuth on the backend`, async ({ page }) => {
-    await mock(page, false)
-    const apiRequests: string[] = []
-    page.on('request', request => {
-      if (new URL(request.url()).pathname.startsWith('/api/')) apiRequests.push(request.url())
-    })
-    await page.route('**/oauth2/authorization/google', async route => {
-      expect(route.request().isNavigationRequest()).toBe(true)
-      expect(route.request().resourceType()).toBe('document')
-      await route.fulfill({ contentType: 'text/html', body: '<!doctype html><p>Google login</p>' })
-    })
-    await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-    await page.goto('/')
-    await expect(page.locator('.trading-card h3')).toHaveText('Neon Night')
-    await expect(page.locator(selector)).toHaveAttribute('href', 'http://localhost:8080/oauth2/authorization/google')
-    expect(apiRequests.some(url => new URL(url).pathname === '/api/auth/status')).toBe(false)
-    expect(apiRequests.some(url => new URL(url).pathname === '/api/discovery/trending')).toBe(true)
-    expect(apiRequests.every(url => new URL(url).origin === 'http://localhost:8080')).toBe(true)
-    await page.locator(selector).click()
-    await expect(page).toHaveURL('http://localhost:8080/oauth2/authorization/google')
-    await expect(page.getByText('Google login')).toBeVisible()
-  })
-}
-
 async function mock(page: Page, authenticated: boolean) {
   const prompts: string[] = []
   const writes: string[] = []
@@ -45,7 +20,9 @@ async function mock(page: Page, authenticated: boolean) {
     if (path === '/api/playlists') body = [{ id: 'saved-1', title: 'Night Drive', description: '', thumbnailUrl: null, itemCount: 3 }]
     if (path === '/api/playlists/saved-1/items') body = songs
     if (path === '/api/discovery/trending') body = songs
-    if (path === '/api/search/direct') body = songs
+    if (path === '/api/search') body = { tracks: songs, totalPages: 1, nextPageToken: '' }
+    if (path === '/api/user/feed') body = { quickPicks: songs, trending: songs, userPlaylists: [{ id: 'saved-1', title: 'Night Drive', itemCount: 3 }] }
+    if (path === '/api/curation/next-similar') body = continuation
     if (path === '/api/recommend') {
       const prompt = request.postDataJSON().prompt as string
       prompts.push(prompt)
@@ -55,9 +32,9 @@ async function mock(page: Page, authenticated: boolean) {
   })
   await page.route('https://www.youtube.com/iframe_api', route => route.fulfill({ contentType: 'application/javascript', body: `
     window.YT = { Player: class {
-      constructor(element, options) { this.options=options; this.id=''; this.iframe=document.createElement('iframe'); element.replaceWith(this.iframe); setTimeout(()=>options.events.onReady({target:this}),0); }
+      constructor(element, options) { this.options=options; this.id=''; this.iframe=document.createElement('iframe'); element.replaceWith(this.iframe); window.addEventListener('test-yt-error', event=>options.events.onError({target:this,data:event.detail})); window.addEventListener('test-yt-ended', ()=>options.events.onStateChange({target:this,data:0})); setTimeout(()=>options.events.onReady({target:this}),0); }
       getIframe(){return this.iframe} getVideoData(){return {video_id:this.id}}
-      loadVideoById(id){this.id=id;this.options.events.onStateChange({target:this,data:2})}
+      loadVideoById(id){this.id=id;this.iframe.setAttribute('data-video-id',id);this.options.events.onStateChange({target:this,data:2})}
       playVideo(){this.options.events.onStateChange({target:this,data:1})}
       pauseVideo(){this.options.events.onStateChange({target:this,data:2})}
       getCurrentTime(){return this.time || 0} getDuration(){return 180} seekTo(time){this.time=time}
@@ -67,18 +44,84 @@ async function mock(page: Page, authenticated: boolean) {
   return { prompts, writes }
 }
 
-test('sleeping backend never triggers health probes or a terminal on page load', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+})
+
+test('guest search starts playback, next curates, artwork restores and Space toggles', async ({ page }) => {
+  await mock(page, false)
+  await page.goto('/')
+  await page.getByLabel('Enter your music vibe').fill('night drive')
+  await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
+  await page.getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
+  await expect(page.locator('.player-dock')).toBeVisible()
+  await page.getByRole('button', { name: 'Next track', exact: true }).click()
+  await expect(page.locator('.dock-title strong')).toHaveText('Next Vibe')
+  await page.getByRole('button', { name: 'Restore player from thumbnail' }).click()
+  await expect(page.locator('.player-lcd h2')).toHaveText('Next Vibe')
+  await page.getByRole('slider', { name: 'Track position', exact: true }).fill('60')
+  await expect(page.locator('.player-progress')).toContainText('1:00 / 3:00')
+  await page.getByRole('button', { name: 'Minimize player' }).click()
+  await page.locator('body').click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press('Space')
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Stop and close player' }).click()
+  await expect(page.locator('.audio-engine iframe')).toHaveCount(0)
+})
+
+test('remote playlist plays a wrapping queue and retains its iframe across expansion', async ({ page }) => {
+  const { prompts } = await mock(page, true)
+  await page.goto('/')
+  await page.getByRole('button', { name: /Night Drive/ }).click()
+  await expect(page.locator('.dock-title strong')).toHaveText('Neon Night')
+  const engine = page.locator('.audio-engine iframe')
+  await engine.evaluate(el => el.setAttribute('data-instance', 'original'))
+  await page.getByRole('button', { name: 'Previous track', exact: true }).click()
+  await expect(page.locator('.dock-title strong')).toHaveText('Arcade Moon')
+  await page.getByRole('button', { name: 'Next track', exact: true }).click()
+  await expect(page.locator('.dock-title strong')).toHaveText('Neon Night')
+  await page.getByRole('button', { name: 'Restore music player' }).click()
+  await expect(engine).toHaveAttribute('data-instance', 'original')
+  await page.keyboard.press('Escape')
+  await expect(engine).toHaveAttribute('data-instance', 'original')
+  expect(prompts).toHaveLength(0)
+})
+
+test('shelf likes persist and theme survives reload', async ({ page }) => {
+  const { writes } = await mock(page, true)
+  await page.goto('/')
+  await page.locator('.music-shelf').first().getByRole('button', { name: 'Like Neon Night', exact: true }).click()
+  await page.getByRole('button', { name: 'Switch to light theme' }).click()
+  await page.reload()
+  await expect(page.locator('body')).toHaveClass(/theme-light/)
+  await expect(page.locator('.music-shelf').first().getByRole('button', { name: 'Neon Night in Swiped', exact: true })).toBeDisabled()
+  expect(writes).toHaveLength(0)
+})
+
+test('personal connect navigates to backend OAuth and logout uses POST', async ({ page }) => {
+  await mock(page, false)
+  await page.route('**/oauth2/authorization/google', route => route.fulfill({ contentType: 'text/html', body: '<p>Google login</p>' }))
+  await page.goto('/')
+  await page.getByRole('button', { name: '[ > YOUR PERSONAL MUZE < ]' }).click()
+  await expect(page).toHaveURL('http://localhost:8080/oauth2/authorization/google')
+  await mock(page, true)
+  await page.goto('http://localhost:4200/')
+  await page.route('**/logout', route => {
+    expect(route.request().method()).toBe('POST')
+    return route.fulfill({ contentType: 'text/html', body: '<p>Logged out</p>' })
+  })
+  await page.getByRole('button', { name: 'LOG OUT', exact: true }).click()
+  await expect(page.getByText('Logged out')).toBeVisible()
+})
+
+test('sleeping backend does not wake on guest landing', async ({ page }) => {
   await page.clock.install()
   await mock(page, false)
   let probes = 0
   await page.route('**/api/**', route => {
     if (new URL(route.request().url()).pathname === '/api/auth/status') probes++
-    return route.fulfill({
-      headers: { 'access-control-allow-origin': 'http://localhost:4200', 'access-control-allow-credentials': 'true' },
-      contentType: 'text/html', body: '<!doctype html>Render booting',
-    })
+    return route.fulfill({ contentType: 'text/html', body: '<p>Starting</p>' })
   })
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
   await page.goto('/')
   await expect(page.getByLabel('Enter your music vibe')).toBeEnabled()
   await page.clock.fastForward(10000)
@@ -86,431 +129,56 @@ test('sleeping backend never triggers health probes or a terminal on page load',
   expect(probes).toBe(0)
 })
 
-for (const action of ['search', 'login']) {
-  test(`closing the terminal cancels ${action} and stops wake-up polling`, async ({ page }) => {
-    await page.clock.install()
-    const { prompts } = await mock(page, false)
-    let probes = 0
-    let ready = false
-    await page.route('**/api/auth/status', route => {
-      probes++
-      return route.fulfill({
-        headers: { 'access-control-allow-origin': 'http://localhost:4200', 'access-control-allow-credentials': 'true' },
-        contentType: ready ? 'application/json' : 'text/html',
-        body: ready ? '{"authenticated":false}' : '<!doctype html>Render booting',
-      })
-    })
-    await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
+for (const code of [2, 100, 101, 150]) {
+  test(`YouTube error ${code} automatically advances once`, async ({ page }) => {
+    await mock(page, true)
+    let requests = 0
+    await page.route('**/api/curation/next-similar?**', async route => { requests++; await route.fulfill({ contentType: 'application/json', body: JSON.stringify(continuation) }) })
     await page.goto('/')
-    if (action === 'search') {
-      await page.getByLabel('Enter your music vibe').fill('cancelled jazz')
-      await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
-    } else await page.locator('.account-banner').click()
-    await expect(page.getByRole('dialog', { name: 'Backend waking up' })).toBeVisible()
-    await page.getByRole('button', { name: 'Close wake-up popup' }).click()
-    await expect(page.getByRole('dialog')).toHaveCount(0)
-    const probesAtClose = probes
-    ready = true
-    await page.clock.fastForward(10000)
-    expect(probes).toBe(probesAtClose)
-    expect(prompts).toHaveLength(0)
-    await expect(page).toHaveURL('http://localhost:4200/')
-    await expect(page.getByLabel('Enter your music vibe')).toBeEnabled()
-    // Cancellation does not poison later actions.
-    await page.getByLabel('Enter your music vibe').fill('retry jazz')
-    await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
-    await expect(page.locator('.recommendations .song-card')).toHaveCount(3)
-    expect(prompts).toEqual(['retry jazz'])
+    await page.locator('.music-shelf').first().getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
+    await expect(page.locator('.audio-engine iframe')).toHaveAttribute('data-video-id', songs[0].youtubeVideoId)
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
+    await page.evaluate(code => {
+      window.dispatchEvent(new CustomEvent('test-yt-error', { detail: code }))
+      window.dispatchEvent(new CustomEvent('test-yt-error', { detail: code }))
+    }, code)
+    await expect(page.locator('.dock-title strong')).toHaveText('Next Vibe')
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
+    expect(requests).toBe(1)
   })
 }
 
-test('guest normal search plays tracks and save buttons prompt without navigating', async ({ page }) => {
-  const { writes } = await mock(page, false)
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-  await page.goto('/')
-  await page.getByRole('button', { name: 'NORMAL SEARCH', exact: true }).click()
-  await page.getByLabel('Enter your music vibe').fill('Neon Night')
-  await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
-  await expect(page.locator('.recommendations .song-card')).toHaveCount(3)
-  await page.getByRole('button', { name: 'Like Neon Night', exact: true }).click()
-  await expect(page.locator('.toast')).toContainText('Connect your Google account to save tracks')
-  await page.getByRole('region', { name: 'Recommended songs' }).getByRole('button', { name: 'Add Neon Night to playlist', exact: true }).click()
-  await expect(page.locator('.toast')).toBeVisible()
-  await expect(page).toHaveURL('http://localhost:4200/')
-  await page.getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
-  await expect(page.locator('.player-dock')).toBeVisible()
-  expect(writes).toHaveLength(0)
-})
-
-for (const action of ['search', 'normal search', 'login']) {
-  test(`cold start terminal resumes pending ${action} after HTML boot page`, async ({ page }) => {
-    const { prompts } = await mock(page, false)
-    await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-    await page.goto('/')
-    await expect(page.locator('.trading-card h3')).toHaveText('Neon Night')
-    let ready = false
-    await page.route('**/api/auth/status', route => route.fulfill({
-      headers: { 'access-control-allow-origin': 'http://localhost:4200', 'access-control-allow-credentials': 'true' },
-      contentType: ready ? 'application/json' : 'text/html',
-      body: ready ? '{"authenticated":false}' : '<!doctype html><p>Render waking</p>',
-    }))
-    await page.route('**/oauth2/authorization/google', route => route.fulfill({ contentType: 'text/html', body: '<p>Google login</p>' }))
-    if (action !== 'login') {
-      if (action === 'normal search') await page.getByRole('button', { name: 'NORMAL SEARCH', exact: true }).click()
-      await page.getByLabel('Enter your music vibe').fill('sleepy jazz')
-      await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
-    } else await page.locator('.account-banner').click()
-    await expect(page.getByRole('dialog', { name: 'Backend waking up' })).toBeVisible()
-    await expect(page.getByText('> SYSTEM STATUS: WAKING CONTAINER...')).toBeVisible()
-    await expect(page).toHaveURL('http://localhost:4200/')
-    expect(prompts).toHaveLength(0)
-    await page.screenshot({ path: `test-results/wake-terminal-${action}.png` })
-    ready = true
-    if (action !== 'login') {
-      await expect(page.locator('.recommendations .song-card')).toHaveCount(3, { timeout: 10000 })
-      expect(prompts).toEqual(action === 'search' ? ['sleepy jazz'] : [])
-    } else await expect(page).toHaveURL('http://localhost:8080/oauth2/authorization/google', { timeout: 10000 })
-  })
-}
-
-test('guest search, cached intro and standalone continuation', async ({ page }) => {
-  const { prompts } = await mock(page, false)
-  await page.goto('/')
-  await expect(page.locator('.splash-intro')).toBeVisible()
-  await expect(page.locator('.splash-intro')).toHaveCount(0, { timeout: 5000 })
-  await expect(page.getByText('Connect your google account to unlock more features')).toBeVisible()
-  await page.getByLabel('Enter your music vibe').fill('midnight city drive')
-  await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
-  await expect(page.locator('.recommendations .song-card')).toHaveCount(3)
-  await page.getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
-  await expect(page.locator('.player-dock')).toBeVisible()
-  await page.getByRole('button', { name: 'Restore music player' }).click()
-  await expect(page.locator('.player-lcd h2')).toHaveText('Neon Night')
-  await page.getByRole('button', { name: 'Next track', exact: true }).click()
-  await expect(page.locator('.player-lcd h2')).toHaveText('Next Vibe')
-  expect(prompts).toContain('Songs with the same vibe as Artist 1 - Neon Night')
-  await page.getByRole('button', { name: 'Minimize player' }).click()
-  await page.getByRole('button', { name: 'Stop and close player' }).click()
-  await expect(page.locator('.retro-player')).toHaveCount(0)
-  await page.reload()
-  await expect(page.locator('.splash-intro')).toHaveCount(0)
-})
-
-test('YouTube playlists display; liked songs persist without server writes', async ({ page }) => {
-  const { prompts, writes } = await mock(page, true)
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-  await page.goto('/')
-  await expect(page.locator('.account-banner')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'IMPORT PLAYLIST', exact: true })).toBeVisible()
-  await page.getByLabel('Enter your music vibe').fill('night drive')
-  await page.getByRole('button', { name: 'SEARCH', exact: true }).click()
-  await page.getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
-  await expect(page.locator('.player-dock')).toBeVisible()
-  await page.getByRole('button', { name: 'Restore music player' }).click()
-  await page.getByRole('button', { name: 'Next track', exact: true }).click()
-  await expect(page.locator('.player-lcd h2')).toHaveText('Next Vibe')
-  expect(prompts).toHaveLength(2)
-  await expect(page.locator('.retro-player')).toHaveCSS('position', 'fixed')
-  await page.screenshot({ path: 'test-results/muzic-player.png' })
-  await page.getByRole('button', { name: 'Minimize player' }).click()
-  const deck = page.getByLabel('Swipe music deck. Left arrow passes, right arrow likes.')
-  await deck.focus()
-  await deck.press('ArrowRight')
-  await expect(page.locator('.swiped-track')).toHaveCount(1)
-  await expect(page.locator('.personal-feed .song-card')).toHaveCount(1)
-  await page.reload()
-  await expect(page.locator('.swiped-track')).toHaveCount(1)
-  expect(writes).toHaveLength(0)
-  await page.screenshot({ path: 'test-results/muzic-desktop.png', fullPage: true })
-})
-
-test('mobile swipe gesture likes a track without horizontal overflow', async ({ page }) => {
+test('mobile dock has large primary controls and a 48px cover', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mock(page, true)
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
   await page.goto('/')
-  const card = page.locator('.trading-card')
-  await card.scrollIntoViewIfNeeded()
-  const box = await card.boundingBox()
-  if (!box) throw new Error('Missing card')
-  await page.mouse.move(box.x + 40, box.y + 35)
-  await page.mouse.down()
-  await page.mouse.move(box.x + 150, box.y + 35, { steps: 5 })
-  await page.mouse.up()
-  await expect(page.locator('.swiped-track')).toHaveCount(1)
-  await expect(card).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)')
-  await card.getByRole('button', { name: 'PREVIEW TRACK' }).click()
-  await expect(page.locator('.player-dock')).toBeVisible()
-  await page.getByRole('button', { name: 'Restore music player' }).click()
-  await expect(page.locator('.player-lcd h2')).toHaveText('Pixel Sunrise')
-  const frame = await page.locator('.audio-engine iframe').boundingBox()
-  expect(frame?.width).toBe(1)
-  expect(frame?.x).toBeLessThan(0)
+  await page.locator('.music-shelf').first().getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
+  await expect(page.locator('.player-dock')).toHaveCSS('height', '70px')
+  await expect(page.locator('.dock-art')).toHaveCSS('width', '48px')
+  await expect(page.getByRole('button', { name: 'Previous track' })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Shuffle', exact: true })).toBeHidden()
+  expect((await page.getByRole('button', { name: 'Pause', exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(44)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-  await page.screenshot({ path: 'test-results/muzic-mobile.png', fullPage: true })
+  await page.screenshot({ path: 'test-results/mobile-dashboard-dock.png', fullPage: true })
+  await page.setViewportSize({ width: 320, height: 740 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await expect(page.getByRole('button', { name: 'Search music' })).toBeInViewport()
+  await expect(page.getByRole('button', { name: 'LOG OUT', exact: true })).toBeInViewport()
+  await page.getByRole('button', { name: 'Search music' }).click()
+  await expect(page.getByLabel('Enter your music vibe')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
-test('pixel player likes, seeks, minimizes and shuffles without repeating Swiped', async ({ page }) => {
+test('a restricted playlist track is skipped on later queue wraps', async ({ page }) => {
   await mock(page, true)
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
   await page.goto('/')
-  await page.getByRole('button', { name: 'PREVIEW TRACK' }).click()
-  await expect(page.locator('.player-dock')).toBeVisible()
-  await page.getByRole('button', { name: 'Restore music player' }).click()
-  await expect(page.getByRole('dialog', { name: 'Music player', exact: true })).toBeVisible()
-  await expect(page.locator('.audio-engine iframe')).toHaveAttribute('aria-hidden', 'true')
-  await page.getByRole('button', { name: '+ ADD TO SWIPED' }).click()
-  await expect(page.getByRole('button', { name: 'IN SWIPED' })).toBeDisabled()
-  await expect(page.getByRole('slider', { name: 'Track position', exact: true })).toBeEnabled()
-  await page.getByRole('slider', { name: 'Track position', exact: true }).fill('60')
-  await expect(page.locator('.player-progress')).toContainText('1:00 / 3:00')
-  await page.getByRole('button', { name: 'Minimize player' }).click()
-  await expect(page.locator('.player-dock')).toBeVisible()
-  await page.getByRole('button', { name: 'Pause', exact: true }).click()
-  await page.getByRole('button', { name: 'Play', exact: true }).click()
-  await page.getByRole('button', { name: 'Shuffle', exact: true }).click()
-  await expect(page.locator('.dock-title strong')).not.toHaveText('Neon Night')
-  await page.getByRole('button', { name: 'Restore player from thumbnail' }).click()
-  await expect(page.getByRole('dialog', { name: 'Music player', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Minimize player' }).click()
-  await page.getByRole('button', { name: 'Stop and close player' }).click()
-  await expect(page.locator('.swiped-library .swiped-track')).toHaveCount(1)
-})
-
-test('Swiped preview caps at three; library searches, groups and removes selected tracks', async ({ page }) => {
-  await mock(page, true)
-  await page.addInitScript(tracks => {
-    sessionStorage.setItem('muzic:intro-seen', '1')
-    if (!localStorage.getItem('muzic:swiped:v1:user-a')) localStorage.setItem('muzic:swiped:v1:user-a', JSON.stringify(tracks))
-  }, [...songs, continuation])
-  await page.goto('/')
-  await expect(page.locator('.swiped-library > .swiped-list .swiped-track')).toHaveCount(3)
-  await page.getByRole('button', { name: 'SHOW ALL' }).click()
-  const library = page.getByRole('dialog', { name: 'Swiped library' })
-  await expect(library.locator('.library-card')).toHaveCount(4)
-  await library.getByRole('searchbox').fill('Artist 2')
-  await expect(library.locator('.library-card')).toHaveCount(1)
-  await library.getByRole('searchbox').fill('')
-  await library.getByRole('combobox').selectOption('artist')
-  await expect(library.locator('.artist-group')).toHaveCount(3)
-  await library.getByRole('button', { name: 'Select Tracks' }).click()
-  await library.getByRole('checkbox', { name: 'Select Neon Night', exact: true }).check()
-  await library.getByRole('checkbox', { name: 'Select Pixel Sunrise', exact: true }).check()
-  await library.getByRole('button', { name: 'Remove selected tracks' }).click()
-  await expect(library.locator('.library-card')).toHaveCount(2)
-  await page.screenshot({ path: 'test-results/muzic-library.png' })
-  await library.getByRole('checkbox', { name: 'Select All', exact: true }).check()
-  await library.getByRole('button', { name: 'Remove selected tracks' }).click()
-  await expect(library.locator('.library-card')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Close Swiped library' }).click()
-  await page.reload()
-  await expect(page.locator('.swiped-library .swiped-track')).toHaveCount(0)
-})
-
-for (const endpoint of ['/api/me', '/api/playlists']) {
-  test(`401 from ${endpoint} returns to guest and allows Google reconnect`, async ({ page }) => {
-    await mock(page, true)
-    await page.route(`**${endpoint}`, route => route.fulfill({
-      status: 401,
-      headers: { 'access-control-allow-origin': route.request().headers().origin || 'http://localhost:4200', 'access-control-allow-credentials': 'true' },
-      contentType: 'application/json', body: '{}',
-    }))
-    await page.route('**/oauth2/authorization/google', route => route.fulfill({
-      contentType: 'text/html', body: '<p>Google login</p>',
-    }))
-    await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-    await page.goto('/')
-    if (endpoint === '/api/playlists') await page.getByRole('button', { name: 'IMPORT PLAYLIST', exact: true }).click()
-    await expect(page.locator('.account-banner')).toBeVisible()
-    await expect(page.locator('.saved-playlists')).toHaveCount(0)
-    await page.locator('.account-banner').click()
-    await expect(page).toHaveURL(/\/oauth2\/authorization\/google$/)
-  })
-}
-test('theme persists, space toggles playback and player fits small viewports', async ({ page }) => {
-  await mock(page, true)
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-  await page.goto('/')
-  await page.getByRole('button', { name: 'Switch to light theme' }).click()
-  await expect(page.locator('body')).toHaveClass(/theme-light/)
-  await page.reload()
-  await expect(page.locator('body')).toHaveClass(/theme-light/)
-  await page.getByRole('button', { name: 'PREVIEW TRACK' }).click()
-  await expect(page.locator('.player-dock')).toBeVisible()
-  await page.getByRole('button', { name: 'Restore music player' }).click()
-  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
-  await page.locator('.player-lcd').click()
-  await page.keyboard.press('Space')
-  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
-  await page.keyboard.press('Space')
-  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
-  for (const viewport of [{width:320,height:568},{width:390,height:844},{width:430,height:700},{width:844,height:390},{width:1280,height:800}]) {
-    await page.setViewportSize(viewport)
-    expect(await page.locator('.retro-player').evaluate(el => ({fits: el.scrollHeight <= el.clientHeight && el.scrollWidth <= el.clientWidth, height:el.clientHeight, content:el.scrollHeight})), JSON.stringify(viewport)).toMatchObject({fits:true})
-    const art = await page.locator('.player-art').boundingBox()
-    expect(art!.width / art!.height).toBeCloseTo(16 / 9, 1)
-    await expect(page.locator('.player-actions')).toBeInViewport()
-    await expect(page.locator('.player-volume')).toBeInViewport()
-    if (viewport.width === 320 || viewport.width === 844) await page.screenshot({ path: 'test-results/muze-deck-' + viewport.width + '.png' })
-  }
-})
-
-test('creates a YouTube playlist and adds current track to existing or new playlist', async ({ page }) => {
-  await mock(page, true)
-  const bodies: unknown[] = []
-  await page.route('**/api/playlists**', async route => {
-    if (route.request().method() === 'OPTIONS') { await route.fulfill({status:204}); return }
-    const data = route.request().postDataJSON()
-    if (data) bodies.push(data)
-    const item = {id:'custom',title:'My playlist',description:'',thumbnailUrl:null,itemCount:0}
-    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(route.request().method() === 'GET' ? [item] : item)})
-  })
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-  await page.goto('/')
-  await page.getByRole('button', {name:'CREATE PLAYLIST',exact:true}).click()
-  await page.getByLabel('Title',{exact:true}).fill('My playlist')
-  await page.getByRole('button', {name:'CREATE',exact:true}).click()
-  await expect(page.locator('.playlist-dialog')).toHaveCount(0)
-  await page.getByRole('button', {name:'PREVIEW TRACK'}).click()
-  await expect(page.locator('.player-dock')).toBeVisible()
-  await page.getByRole('button', { name: 'Restore music player' }).click()
-  await page.getByRole('button', {name:'+ ADD TO PLAYLIST',exact:true}).click()
-  await page.getByLabel('Playlist',{exact:true}).selectOption('custom')
-  await page.getByRole('button', {name:'ADD TRACK',exact:true}).click()
-  await expect(page.locator('.playlist-dialog')).toHaveCount(0)
-  await page.getByRole('button', {name:'+ ADD TO PLAYLIST',exact:true}).click()
-  await page.getByLabel('Title',{exact:true}).fill('Another playlist')
-  await page.getByLabel('Title',{exact:true}).press('Space')
-  await expect(page.getByRole('button', {name:'Pause',exact:true})).toBeVisible()
-  await page.getByRole('button', {name:'ADD TRACK',exact:true}).click()
-  await expect(page.locator('.playlist-dialog')).toHaveCount(0)
-  expect(bodies).toContainEqual({title:'My playlist',description:'',privacyStatus:'private'})
-  expect(bodies.filter(body => (body as {videoId?:string}).videoId)).toHaveLength(2)
-})
-
-test('normal search bypasses AI and track cards offer like and playlist actions', async ({ page }) => {
-  const { prompts } = await mock(page, true)
-  let query = ''
-  let count = 3
-  const inserts: string[] = []
-  await page.route('**/api/search/direct?**', async route => {
-    query = new URL(route.request().url()).searchParams.get('query') || ''
-    await route.fulfill({contentType:'application/json',body:JSON.stringify(songs)})
-  })
-  await page.route('**/api/playlists**', async route => {
-    if (route.request().method() === 'POST') { count++; inserts.push(route.request().postDataJSON().videoId) }
-    await route.fulfill({status:route.request().method() === 'POST' ? 201 : 200, contentType:'application/json',body:JSON.stringify([{id:'music',title:'Music shelf',description:'',thumbnailUrl:null,itemCount:count}])})
-  })
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-  await page.goto('/')
-  await page.getByRole('button', {name:/NORMAL SEARCH/}).click()
-  await expect(page.getByRole('button', {name:/NORMAL SEARCH/})).toHaveAttribute('aria-pressed','true')
-  await expect(page.locator('.mode-help')).toContainText('bypasses AI')
-  await page.getByLabel('Enter your music vibe').fill('song & artist')
-  await page.getByRole('button', {name:'SEARCH',exact:true}).click()
-  await expect(page.locator('.recommendations .song-card')).toHaveCount(3)
-  expect(query).toBe('song & artist')
-  expect(prompts).toHaveLength(0)
-  const card = page.locator('.recommendations .track-card').first()
-  await card.getByRole('button', {name:'Like Neon Night',exact:true}).click()
-  await expect(card.getByRole('button', {name:'Neon Night in Swiped',exact:true})).toBeDisabled()
-  await card.getByRole('button', {name:'Add Neon Night to playlist',exact:true}).click()
-  await page.getByRole('button', {name:'Music shelf 3 tracks',exact:true}).click()
-  await expect(page.locator('.toast')).toHaveText('Added to playlist!')
-  await page.getByRole('button', { name: 'IMPORT PLAYLIST', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Music shelf 4 TRACKS', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Close import playlist' }).click()
-  expect(inserts).toEqual([songs[0].youtubeVideoId])
-  await page.getByRole('button', {name:/AI VIBE/}).click()
-  await expect(page.locator('.mode-help')).toContainText('Describe a vibe')
-  await page.getByRole('button', {name:'SEARCH',exact:true}).click()
-  await expect.poll(() => prompts.length).toBe(1)
-})
-
-test('imports persist and play with a local wrapping queue', async ({ page }) => {
-  const { prompts } = await mock(page, true)
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-  await page.goto('/')
-  await page.getByRole('button', { name: 'IMPORT PLAYLIST', exact: true }).click()
   await page.getByRole('button', { name: /Night Drive/ }).click()
-  await expect(page.getByRole('dialog', { name: 'Night Drive tracks' })).toBeVisible()
-  await page.getByRole('button', { name: 'PLAY ALL', exact: true }).click()
   await expect(page.locator('.dock-title strong')).toHaveText('Neon Night')
-  await page.getByRole('button', { name: 'Next track', exact: true }).click()
+  await expect(page.locator('.audio-engine iframe')).toHaveAttribute('data-video-id', songs[0].youtubeVideoId)
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('test-yt-error', { detail: 150 })))
   await expect(page.locator('.dock-title strong')).toHaveText('Pixel Sunrise')
-  await page.getByRole('button', { name: 'Previous track', exact: true }).click()
-  await expect(page.locator('.dock-title strong')).toHaveText('Neon Night')
-  await page.getByRole('button', { name: 'Previous track', exact: true }).click()
+  await page.getByRole('button', { name: 'Next track', exact: true }).click()
   await expect(page.locator('.dock-title strong')).toHaveText('Arcade Moon')
-  expect(prompts).toHaveLength(0)
-  await page.reload()
-  await expect(page.locator('.imported-tag')).toHaveText('Imported / 3 TRACKS')
-  await expect(page.locator('.saved-playlists a')).toHaveCount(0)
-})
-
-
-test('dock defaults, instant queue playback and the same iframe survive restore, minimize and background events', async ({ page }) => {
-  await mock(page, true)
-  await page.addInitScript(tracks => {
-    sessionStorage.setItem('muzic:intro-seen', '1')
-    localStorage.setItem('muzic-imported:user-a', JSON.stringify([{id:'saved-1',title:'Night Drive',songs:tracks}]))
-  }, songs)
-  await page.goto('/')
-  await page.getByRole('button', { name: /Night Drive/ }).click()
-  await page.getByRole('button', { name: 'PLAY ALL', exact: true }).click()
-  await expect(page.locator('.player-dock')).toBeVisible()
-  await expect(page.getByRole('dialog', { name: 'Music player', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
-  const engine = page.locator('.audio-engine iframe')
-  await engine.evaluate(el => el.setAttribute('data-instance', 'original'))
-  await page.getByRole('button', { name: 'Pause', exact: true }).click()
   await page.getByRole('button', { name: 'Next track', exact: true }).click()
   await expect(page.locator('.dock-title strong')).toHaveText('Pixel Sunrise')
-  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Pause', exact: true }).click()
-  await page.getByRole('button', { name: 'Previous track', exact: true }).click()
-  await expect(page.locator('.dock-title strong')).toHaveText('Neon Night')
-  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Restore music player' }).click()
-  await expect(page.locator('.retro-player .player-window-controls button')).toHaveCount(1)
-  await expect(page.getByRole('button', { name: 'Stop and close player' })).toHaveCount(0)
-  await expect(engine).toHaveAttribute('data-instance', 'original')
-  await page.screenshot({ path: 'test-results/muze-deck.png' })
-  await page.keyboard.press('Escape')
-  await expect(page.locator('.player-dock')).toBeVisible()
-  await expect(engine).toHaveAttribute('data-instance', 'original')
-  await page.evaluate(() => { window.dispatchEvent(new Event('blur')); document.dispatchEvent(new Event('visibilitychange')) })
-  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
-  const frame = await engine.boundingBox()
-  expect(frame?.width).toBe(1); expect(frame?.x).toBeLessThan(0)
-  await page.screenshot({ path: 'test-results/muze-dock.png', fullPage: true })
-  await page.getByRole('button', { name: 'Stop and close player' }).click()
-  await expect(page.locator('.audio-engine iframe')).toHaveCount(0)
-  await expect(page.locator('.player-dock')).toHaveCount(0)
-})
-
-test('header menu opens friends dialog and submits a real backend logout', async ({ page }) => {
-  await mock(page, true)
-  await page.addInitScript(() => sessionStorage.setItem('muzic:intro-seen', '1'))
-  await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Your personal Muze' })).toBeVisible()
-  await expect(page.locator('body')).not.toContainText('LEVEL 01')
-  await expect(page.locator('body')).not.toContainText('LEVEL 02')
-  await page.getByRole('button', { name: 'User menu' }).click()
-  await page.getByRole('menuitem', { name: 'Add friends' }).click()
-  await expect(page.getByRole('dialog', { name: 'Add friends', exact: true })).toContainText('Coming soon, Sam is working on it')
-  await page.screenshot({ path: 'test-results/muze-friends.png' })
-  await page.getByRole('button', { name: 'OK', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'User menu' })).toBeFocused()
-  await page.getByRole('button', { name: 'User menu' }).click()
-  await page.keyboard.press('Escape')
-  await expect(page.getByRole('menu', { name: 'Account options' })).toHaveCount(0)
-  await page.route('**/logout', route => {
-    expect(route.request().method()).toBe('POST')
-    return route.fulfill({ contentType: 'text/html', body: '<p>Logged out</p>' })
-  })
-  await page.getByRole('button', { name: 'User menu' }).click()
-  await page.getByRole('menuitem', { name: 'Logout' }).click()
-  await expect(page).toHaveURL('http://localhost:8080/logout')
-  await expect(page.getByText('Logged out')).toBeVisible()
 })

@@ -8,7 +8,7 @@ import { useSwiped } from '../discovery/SwipedContext'
 interface PlayerState {
   minimized: boolean; setMinimized: (value: boolean) => void; playbackKey: number; song: Song | null; playing: boolean; shuffle: boolean; volume: number; busy: boolean; message: string; playlistMode: boolean
   play: (song: Song, queue?: Song[], playlistId?: string) => void
-  next: () => Promise<void>; previous: () => void; toggle: () => void; stop: () => void
+  next: (unavailable?: boolean) => Promise<void>; previous: () => void; toggle: () => void; stop: () => void
   shuffleTrack: () => Promise<void>
   setShuffle: (value: boolean) => void; setVolume: (value: number) => void
   setPlaying: (value: boolean) => void; setMessage: (value: string) => void
@@ -25,7 +25,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [volume, setVolume] = useState(70)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
-  const session = useRef({ queue: [] as Song[], index: 0, playlist: false, seen: new Set<string>() })
+  const session = useRef({ queue: [] as Song[], index: 0, playlist: false, seen: new Set<string>(), unavailable: new Set<string>() })
   const request = useRef<AbortController | null>(null)
   const cancel = useCallback(() => { request.current?.abort(); request.current = null; setBusy(false) }, [])
   useEffect(() => () => request.current?.abort(), [])
@@ -33,14 +33,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     cancel()
     const tracks = uniqueSongs(queue?.length ? queue : [track])
     if (!tracks.some(item => item.youtubeVideoId === track.youtubeVideoId)) tracks.unshift(track)
-    session.current = { queue: tracks, index: tracks.findIndex(item => item.youtubeVideoId === track.youtubeVideoId), playlist: playlistId !== undefined, seen: new Set([track.youtubeVideoId]) }
+    session.current = { queue: tracks, index: tracks.findIndex(item => item.youtubeVideoId === track.youtubeVideoId), playlist: playlistId !== undefined, seen: new Set([track.youtubeVideoId]), unavailable: new Set() }
     setPlaylistMode(playlistId !== undefined)
     setPlaybackKey(value => value + 1); setSong(track); setPlaying(true); setMessage('')
   }, [cancel])
-  const next = useCallback(async () => {
+  const next = useCallback(async (unavailable = false) => {
     if (!song || request.current) return
     const state = session.current
-    const index = planNext(state.index, state.queue.length, state.playlist, shuffle)
+    if (unavailable) state.unavailable.add(song.youtubeVideoId)
+    let index = planNext(state.index, state.queue.length, state.playlist, shuffle)
+    if (index !== null && state.unavailable.has(state.queue[index].youtubeVideoId)) {
+      index = Array.from({ length: state.queue.length }, (_, offset) => (state.index + 1 + offset) % state.queue.length)
+        .find(candidate => !state.unavailable.has(state.queue[candidate].youtubeVideoId)) ?? null
+    }
     if (index !== null) {
       state.index = index
       const track = state.queue[state.index]
@@ -48,11 +53,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     const controller = new AbortController(); request.current = controller; setBusy(true); setMessage('CURATING NEXT VIBE...')
     try {
-      const tracks = uniqueSongs(await api.recommend(`Songs with the same vibe as ${song.artist} - ${song.title}`, controller.signal), state.seen)
+      const recent = [...state.seen].slice(-12)
+      const excluded = [...new Set([...recent, ...state.unavailable])]
+      const tracks = uniqueSongs([await api.nextSimilar(song, excluded, controller.signal)], new Set(excluded))
       if (controller.signal.aborted || request.current !== controller) return
       if (!tracks.length) { setMessage('No new tracks found. Try another vibe.'); return }
-      state.queue.push(...tracks); state.index += 1
+      state.index = state.queue.length; state.queue.push(...tracks)
+      if (state.playlist) { state.playlist = false; setPlaylistMode(false) }
       const track = state.queue[state.index]; state.seen.add(track.youtubeVideoId)
+      state.seen = new Set([...recent.filter(id => id !== track.youtubeVideoId), track.youtubeVideoId])
       setPlaybackKey(value => value + 1); setSong(track); setPlaying(true); setMessage('')
     } catch (error) {
       if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : 'Could not continue this vibe.')

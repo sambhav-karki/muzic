@@ -46,6 +46,8 @@ export default function RetroPlayer() {
   const loadedId = useRef('')
   const loadedKey = useRef(-1)
   const transitioning = useRef(false)
+  const failedKey = useRef(-1)
+  const consecutiveFailures = useRef(0)
   const hasSong = Boolean(player.song)
   useEffect(() => {
     if (!hasSong || !host.current) return
@@ -68,15 +70,27 @@ export default function RetroPlayer() {
           onStateChange: ({ data, target }) => {
             if (cancelled || loadedKey.current !== latest.current.playbackKey || target.getVideoData().video_id !== latest.current.song?.youtubeVideoId) return
             if (data === 0) { latest.current.setPlaying(false); void latest.current.next() }
-            if (data === 1) { transitioning.current = false; latest.current.setPlaying(true); latest.current.setMessage('') }
+            if (data === 1) { transitioning.current = false; consecutiveFailures.current = 0; latest.current.setPlaying(true); latest.current.setMessage('') }
             if (data === 2 && !transitioning.current) latest.current.setPlaying(false)
           },
-          onError: ({ data, target }) => { if (!cancelled && loadedKey.current === latest.current.playbackKey && (!target.getVideoData().video_id || target.getVideoData().video_id === latest.current.song?.youtubeVideoId)) { transitioning.current = false; latest.current.setPlaying(false); latest.current.setMessage(`YouTube cannot play this track (${data}). Select Next to try another.`) } },
+          onError: ({ data, target }) => {
+            const state = latest.current
+            if (cancelled || loadedKey.current !== state.playbackKey || (target.getVideoData().video_id && target.getVideoData().video_id !== state.song?.youtubeVideoId) || failedKey.current === loadedKey.current) return
+            failedKey.current = loadedKey.current
+            transitioning.current = false; state.setPlaying(false)
+            if ([2, 100, 101, 150].includes(data) && consecutiveFailures.current < 5) {
+              consecutiveFailures.current += 1
+              state.setMessage('TRACK UNAVAILABLE. TUNING THE NEXT TRACK...')
+              void state.next(true)
+            } else {
+              state.setMessage(`YouTube cannot play this track (${data}). ${consecutiveFailures.current >= 5 ? 'Several tracks were unavailable. Press Next to retry.' : 'Press Next or choose another track.'}`)
+            }
+          },
           onAutoplayBlocked: () => { if (!cancelled) { transitioning.current = false; latest.current.setPlaying(false); latest.current.setMessage('Press Play to start playback.') } },
         },
       })
     }).catch((error: unknown) => { if (!cancelled) latest.current.setMessage(error instanceof Error ? error.message : 'YouTube unavailable.') })
-    return () => { cancelled = true; instance.current?.destroy(); instance.current = null; loadedId.current = ''; loadedKey.current = -1; transitioning.current = false; mount.remove() }
+    return () => { cancelled = true; instance.current?.destroy(); instance.current = null; loadedId.current = ''; loadedKey.current = -1; failedKey.current = -1; consecutiveFailures.current = 0; transitioning.current = false; mount.remove() }
   }, [hasSong])
   useEffect(() => {
     const yt = instance.current
