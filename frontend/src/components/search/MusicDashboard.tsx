@@ -5,8 +5,8 @@ import { connectGoogle } from '../../services/api'
 import RetroSearchBar from './RetroSearchBar'
 import SongCard from './SongCard'
 
-interface Props { profile: Profile; onPlay: (song: Song, queue?: Song[], playlistId?: string) => void }
-export default function MusicDashboard({ profile, onPlay }: Props) {
+interface Props { profile: Profile; onPlay: (song: Song, queue?: Song[], playlistId?: string) => void; compact?: boolean }
+export default function MusicDashboard({ profile, onPlay, compact = false }: Props) {
   const [mode, setMode] = useState<'ai' | 'normal'>('ai')
   const [searched, setSearched] = useState(false)
   const [songs, setSongs] = useState<Song[]>([])
@@ -42,14 +42,14 @@ export default function MusicDashboard({ profile, onPlay }: Props) {
     }
   }
   return <>
-    <RetroSearchBar loading={loading} onSearch={search} mode={mode} />
+    <div className={'hub-controls ' + (compact ? 'compact' : '')}><RetroSearchBar loading={loading} onSearch={search} mode={mode} />
     <div className="search-modes" role="group" aria-label="Search mode">
       <span className={'mode-indicator ' + (mode === 'normal' ? 'normal' : '')} aria-hidden="true" />
-      <button type="button" aria-pressed={mode === 'ai'} disabled={loading} onClick={() => { setMode('ai'); setSongs([]); setPage(0) }}>AI VIBE</button>
-      <button type="button" aria-pressed={mode === 'normal'} disabled={loading} onClick={() => { setMode('normal'); setSongs([]); setPage(0) }}>NORMAL SEARCH</button>
-    </div>
-    <p className="mode-help">{mode === 'ai' ? "Describe a vibe, mood, or setting (e.g. 'midnight drive through Tokyo')." : 'Direct song/artist search via YouTube Music (bypasses AI).'}</p>
-    {!profile.authenticated && <div className="personal-connect"><button className="pixel-button" onClick={() => void connectGoogle()}>[ &gt; YOUR PERSONAL MUZE &lt; ]</button><small>Connect Google Account for Personalized Picks, Playlists &amp; YouTube Sync</small></div>}
+      <button type="button" aria-label="AI VIBE" aria-pressed={mode === 'ai'} disabled={loading} onClick={() => { setMode('ai'); setSongs([]); setPage(0) }}>{compact ? 'AI' : 'AI VIBE'}</button>
+      <button type="button" aria-label="NORMAL SEARCH" aria-pressed={mode === 'normal'} disabled={loading} onClick={() => { setMode('normal'); setSongs([]); setPage(0) }}>{compact ? <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 3h9v9H3zM12 12l6 6" /></svg> : 'NORMAL SEARCH'}</button>
+    </div></div>
+    {!compact && <p className="mode-help">{mode === 'ai' ? "Describe a vibe, mood, or setting (e.g. 'midnight drive through Tokyo')." : 'Direct song/artist search via YouTube Music (bypasses AI).'}</p>}
+    {!profile.authenticated && !compact && <div className="personal-connect"><button className="pixel-button" onClick={() => void connectGoogle()}>[ &gt; YOUR PERSONAL MUZE &lt; ]</button><small>Connect Google Account for Personalized Picks, Playlists &amp; YouTube Sync</small></div>}
     {loading && <div className="curating" role="status"><span className="pixel-spinner" aria-hidden="true" />{mode === 'ai' ? 'CURATING SOUNDTRACK...' : 'SEARCHING MUSIC...'}</div>}
     {error && <p className="error-message" role="alert">{error}</p>}
     {(songs.length > 0 || searched) && <section className="recommendations" aria-label="Recommended songs" aria-busy={loading}>

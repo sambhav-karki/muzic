@@ -1,0 +1,24 @@
+.vibe-deck-section { margin:40px 0;padding:28px 12px;border-top:2px solid var(--border);border-bottom:2px solid var(--border);text-align:center;overflow:hidden; }
+.vibe-deck-section h2 { font-family:var(--pixel-font);font-size:16px;color:var(--mint);line-height:1.8; }
+.vibe-instructions { color:var(--muted);font-size:12px;line-height:2; }
+.vibe-anchor { color:var(--yellow);font-size:10px;line-height:1.8; }
+.vibe-deck { width:100%;padding:16px 0;outline-offset:-2px; }
+.vibe-card-stack { position:relative;width:320px;height:420px;max-width:calc(100% - 20px);margin:16px auto 26px; }
+.vibe-card-back { position:absolute;inset:0;background:var(--panel);border:2px solid var(--pink); }
+.back-one { transform:translate(5px,5px) rotate(2deg); }.back-two { transform:translate(9px,9px) rotate(-3deg);border-color:var(--mint); }
+.vibe-card { width:100%;height:100%;position:relative;background:var(--panel);text-align:left;touch-action:pan-y;user-select:none;cursor:grab;will-change:transform; }
+.vibe-card:active { cursor:grabbing; }
+.vibe-art { height:70%;position:relative;background:repeating-linear-gradient(45deg,var(--bg) 0 12px,var(--panel) 12px 24px);border-bottom:3px solid var(--mint);display:grid;place-items:center;overflow:hidden; }
+.vibe-art > span { font-size:72px;color:var(--pink);position:absolute; }
+.vibe-art img { position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;image-rendering:auto;pointer-events:none; }
+.vibe-preview { position:absolute;bottom:12px;left:12px;z-index:2;font-size:10px;min-height:44px; }
+.vibe-card-label { padding:14px;min-width:0; }
+.vibe-card-label small { font-size:9px;color:var(--pink); }.vibe-card-label h3 { font-size:17px;line-height:1.5;margin:8px 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.vibe-card-label p { color:var(--muted);font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0; }
+.vibe-buttons { display:flex;gap:12px;justify-content:center;flex-wrap:wrap; }.vibe-buttons button { font-size:10px;min-height:44px; }
+.swipe-stamp { position:absolute;top:24px;z-index:4;border:3px solid currentColor;padding:12px;font-family:var(--pixel-font);font-size:16px;line-height:1.8;pointer-events:none;animation:stamp-flash .3s steps(2,end) infinite; }
+.pass-stamp { right:14px;transform:rotate(12deg);color:#ff3970;background:#20050bcc; }.like-stamp { left:12px;transform:rotate(-12deg);color:#00ffff;background:#002c2acc;box-shadow:0 0 16px #00ffff88; }
+.vibe-notice { min-height:24px;font-size:13px;color:var(--mint);line-height:1.8; }
+@keyframes stamp-flash { 50% { opacity:.6; } }
+@media(max-width:768px) { .vibe-deck-section { padding:20px 0; }.vibe-deck-section h2 { font-size:13px; }.vibe-instructions { font-size:11px; }.vibe-buttons { gap:8px; }.vibe-buttons button { padding:12px 8px;font-size:9px; } }
+@media(prefers-reduced-motion:reduce) { .swipe-stamp { animation:none; } }

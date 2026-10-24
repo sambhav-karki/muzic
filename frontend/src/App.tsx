@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import SplashIntro from './components/SplashIntro'
 import MusicDashboard from './components/search/MusicDashboard'
-import { api, API_BASE, GUEST_PROFILE, onUnauthorized } from './services/api'
+import { api, API_BASE, GUEST_PROFILE, onUnauthorized, connectGoogle } from './services/api'
+import PixelScatter from './components/PixelScatter'
 import BackendWakeOverlay from './components/BackendWakeOverlay'
 import type { Profile } from './services/api'
 import { PlayerProvider, usePlayer } from './components/player/PlayerContext'
@@ -13,6 +14,7 @@ import PrivacyPolicy from './pages/PrivacyPolicy'
 import TermsOfService from './pages/TermsOfService'
 import './App.css'
 import './stages.css'
+import './playing-layout.css'
 function Dashboard() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => { try { return localStorage.getItem('muzic-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' } })
   useEffect(() => { document.body.classList.toggle('theme-light', theme === 'light'); document.body.classList.toggle('theme-dark', theme === 'dark'); try { localStorage.setItem('muzic-theme', theme) } catch { /* Theme works without storage. */ } }, [theme])
@@ -50,9 +52,9 @@ function Dashboard() {
     return () => document.body.classList.remove('guest-hub')
   }, [profile.authenticated])
   return <><SplashIntro />{toast && <div className="toast pixel-panel" role="status">{toast}</div>}
-    <div className={'app-shell ' + (profile.authenticated ? 'authenticated-shell' : 'guest-shell')}>
+    <div className={'app-shell ' + (profile.authenticated ? 'authenticated-shell' : 'guest-shell') + (!profile.authenticated && player.song ? ' guest-active' : '')}>
       <header className="site-header">
-        {profile.authenticated ? <ProfileMenu profile={profile} /> : <span className="status-chip">SYSTEM ONLINE</span>}
+        {profile.authenticated ? <ProfileMenu profile={profile} /> : player.song ? <button className="pixel-button muze-badge" onClick={() => void connectGoogle()}>[ ✦ MUZE ]</button> : <span className="status-chip">SYSTEM ONLINE</span>}
         <a className="brand" href="#home">Muzic<span>[]</span></a>
         <div className="header-controls">
           {profile.authenticated && <button className="pixel-button secondary" aria-label="Search music" aria-expanded={searchOpen} onClick={() => setSearchOpen(value => !value)}><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 3h9v9H3zM12 12l6 6" /></svg></button>}
@@ -61,7 +63,7 @@ function Dashboard() {
         </div>
       </header>
       <main id="home">
-        {profile.authenticated ? <><div className={'dashboard-search ' + (searchOpen ? 'expanded' : '')} inert={!searchOpen}>{searchOpen && <MusicDashboard profile={profile} onPlay={player.play} />}</div><PersonalDashboard /></> : <section className="hero-deck"><h1 className="muze-headline" data-text="Muze away">Muze away</h1><p>Tell us your mood. Discover your next favorite song.</p><MusicDashboard profile={profile} onPlay={player.play} /></section>}
+        {profile.authenticated ? <><div className={'dashboard-search ' + (searchOpen ? 'expanded' : '')} inert={!searchOpen}>{searchOpen && <MusicDashboard profile={profile} onPlay={player.play} />}</div><PersonalDashboard key={profile.id} userId={profile.id!} /></> : <section className="hero-deck"><PixelScatter active={Boolean(player.song)} /><h1 className="muze-headline" data-text="Muze away">Muze away</h1><p className="hero-tagline">Tell us your mood. Discover your next favorite song.</p><MusicDashboard profile={profile} onPlay={player.play} compact={Boolean(player.song)} /></section>}
       </main>
       <footer className="site-footer pixel-text"><span>MUZIC BY SAM</span><span>BUILT FOR THE LOVE OF MUSIC</span><nav className="legal-links" aria-label="Legal"><a href="/terms">[ Terms of Service ]</a><a href="/privacy">[ Privacy Policy ]</a></nav></footer>
     </div><RetroPlayer />

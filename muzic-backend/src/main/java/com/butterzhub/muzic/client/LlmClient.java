@@ -65,9 +65,16 @@ public class LlmClient {
     }
 
     public List<String> suggestSongs(String prompt) {
+        return suggestSongs(prompt, true);
+    }
+    /** Personalized shelves must not replace failed taste expansion with unrelated starter songs. */
+    public List<String> suggestTasteSongs(String prompt) {
+        return suggestSongs(prompt, false);
+    }
+    private List<String> suggestSongs(String prompt, boolean allowStarters) {
         try {
             if (prompt == null || prompt.isBlank() || apiKey == null || apiKey.isBlank()) {
-                return FallbackTracks.queries(prompt);
+                return allowStarters ? FallbackTracks.queries(prompt) : List.of();
             }
 
             // Keep trusted instructions separate from the user's preferences.
@@ -115,10 +122,10 @@ public class LlmClient {
                 }
             }
             logger.warn("All {} models exhausted, reverting to starter songs", MODELS.size());
-            return FallbackTracks.queries(prompt);
+            return allowStarters ? FallbackTracks.queries(prompt) : List.of();
         } catch (Exception ex) {
             logger.warn("Gemini recommendation failed ({}); using starter songs", ex.getClass().getSimpleName());
-            return FallbackTracks.queries(prompt);
+            return allowStarters ? FallbackTracks.queries(prompt) : List.of();
         }
     }
 

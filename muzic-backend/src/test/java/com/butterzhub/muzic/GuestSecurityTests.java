@@ -31,6 +31,9 @@ class GuestSecurityTests {
         when(youtube.searchPage("jazz", 0, 9, null)).thenReturn(new YouTubeClient.SearchPage(List.of(), null, 0, 1));
         mvc.perform(get("/api/search").param("q", "jazz")).andExpect(status().isOk());
         mvc.perform(get("/api/user/feed")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/curation/swipe-session")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/curation/next-similar").param("videoId", "abcdefghijk").param("distance", "close"))
+            .andExpect(status().isUnauthorized());
         mvc.perform(get("/api/discovery/trending")).andExpect(status().isOk());
         mvc.perform(post("/api/recommend").contentType(MediaType.APPLICATION_JSON)
             .content("{\"prompt\":\"jazz\"}")).andExpect(status().isOk());

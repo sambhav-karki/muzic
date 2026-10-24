@@ -21,7 +21,7 @@ async function mock(page: Page, authenticated: boolean) {
     if (path === '/api/playlists/saved-1/items') body = songs
     if (path === '/api/discovery/trending') body = songs
     if (path === '/api/search') body = { tracks: songs, totalPages: 1, nextPageToken: '' }
-    if (path === '/api/user/feed') body = { quickPicks: songs, trending: songs, userPlaylists: [{ id: 'saved-1', title: 'Night Drive', itemCount: 3 }] }
+    if (path === '/api/user/feed') body = { quickPicks: songs, forgottenFavorites: songs, globalHits: songs, primaryAnchor: 'Night Drive', userPlaylists: [{ id: 'saved-1', title: 'Night Drive', itemCount: 3 }] }
     if (path === '/api/curation/next-similar') body = continuation
     if (path === '/api/recommend') {
       const prompt = request.postDataJSON().prompt as string
@@ -90,11 +90,11 @@ test('remote playlist plays a wrapping queue and retains its iframe across expan
 test('shelf likes persist and theme survives reload', async ({ page }) => {
   const { writes } = await mock(page, true)
   await page.goto('/')
-  await page.locator('.music-shelf').first().getByRole('button', { name: 'Like Neon Night', exact: true }).click()
+  await page.locator('.quick-picks').getByRole('button', { name: 'Like Neon Night', exact: true }).click()
   await page.getByRole('button', { name: 'Switch to light theme' }).click()
   await page.reload()
   await expect(page.locator('body')).toHaveClass(/theme-light/)
-  await expect(page.locator('.music-shelf').first().getByRole('button', { name: 'Neon Night in Swiped', exact: true })).toBeDisabled()
+  await expect(page.locator('.quick-picks').getByRole('button', { name: 'Neon Night in Swiped', exact: true })).toBeDisabled()
   expect(writes).toHaveLength(0)
 })
 
@@ -135,7 +135,7 @@ for (const code of [2, 100, 101, 150]) {
     let requests = 0
     await page.route('**/api/curation/next-similar?**', async route => { requests++; await route.fulfill({ contentType: 'application/json', body: JSON.stringify(continuation) }) })
     await page.goto('/')
-    await page.locator('.music-shelf').first().getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
+    await page.locator('.quick-picks').getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
     await expect(page.locator('.audio-engine iframe')).toHaveAttribute('data-video-id', songs[0].youtubeVideoId)
     await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
     await page.evaluate(code => {
@@ -152,7 +152,7 @@ test('mobile dock has large primary controls and a 48px cover', async ({ page })
   await page.setViewportSize({ width: 390, height: 844 })
   await mock(page, true)
   await page.goto('/')
-  await page.locator('.music-shelf').first().getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
+  await page.locator('.quick-picks').getByRole('button', { name: 'Play Neon Night by Artist 1' }).click()
   await expect(page.locator('.player-dock')).toHaveCSS('height', '70px')
   await expect(page.locator('.dock-art')).toHaveCSS('width', '48px')
   await expect(page.getByRole('button', { name: 'Previous track' })).toBeHidden()

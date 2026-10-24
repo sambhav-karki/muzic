@@ -19,6 +19,7 @@ export interface Song { title: string; artist: string; youtubeVideoId: string; t
 export interface YouTubePlaylist { id: string; title: string; description: string; thumbnailUrl: string | null; itemCount: number }
 export interface Playlist { id: string; name: string; youtubePlaylistId: string | null; songs: Song[] }
 export interface Profile { authenticated: boolean; id: string | null; name: string | null; pictureUrl: string | null }
+export interface DashboardFeed { quickPicks: Song[]; quickPickPool?: Song[]; forgottenFavorites: Song[]; globalHits: Song[]; userPlaylists: YouTubePlaylist[]; primaryAnchor: string; playlistError?: string; musicError?: string }
 export const GUEST_PROFILE: Profile = { authenticated: false, id: null, name: null, pictureUrl: null }
 
 export class ApiError extends Error {
@@ -55,8 +56,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  swipeSession: (signal?: AbortSignal) => request<{ sessionId: string; seed: Song; anchorName: string }>('/api/curation/swipe-session', { signal }),
+  swipeNext: (sessionId: string, song: Song, distance: 'close' | 'divergent', exclude: string[], signal?: AbortSignal) => request<Song>(`/api/curation/next-similar?videoId=${encodeURIComponent(song.youtubeVideoId)}&distance=${distance}&sessionId=${encodeURIComponent(sessionId)}&exclude=${encodeURIComponent(exclude.slice(-150).join(','))}`, { signal }),
   search: (q: string, page: number, token?: string, signal?: AbortSignal) => request<{ tracks: Song[]; nextPageToken: string | null; totalPages: number }>(`/api/search?q=${encodeURIComponent(q)}&mode=NORMAL&page=${page}&size=9${token ? '&pageToken=' + encodeURIComponent(token) : ''}`, { signal }),
-  feed: (signal?: AbortSignal) => request<{ quickPicks: Song[]; trending: Song[]; userPlaylists: YouTubePlaylist[]; playlistError?: string; musicError?: string }>('/api/user/feed', { signal }),
+  feed: (signal?: AbortSignal) => request<DashboardFeed>('/api/user/feed', { signal }),
   nextSimilar: (song: Song, exclude: string[], signal?: AbortSignal) => request<Song>(`/api/curation/next-similar?videoId=${encodeURIComponent(song.youtubeVideoId)}&title=${encodeURIComponent(song.artist + ' - ' + song.title)}&exclude=${encodeURIComponent(exclude.slice(-150).join(','))}`, { signal }),
   directSearch: (query: string, signal?: AbortSignal) => request<Song[]>('/api/search/direct?query=' + encodeURIComponent(query), { signal }),
   authStatus: (signal?: AbortSignal) => request<{ authenticated: boolean }>('/api/auth/status', { signal }),
